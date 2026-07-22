@@ -1,16 +1,13 @@
-# Kataloop Stock — Skript für die Stock-Collection
+# Kataloop Stock — eigene Filter-, Blätter- und Video-Logik
 
-Ein Skript für alle Seiten mit einer Finsweet-CMS-Liste (Stockfotos/-Videos,
-Stockmedien-Teaser). Ersetzt vier bisherige Snippets und behebt die gemeldeten
-Probleme.
+Ein Skript für alle Seiten mit der Stock-Collection. **Keine Fremdbibliothek**,
+keine Finsweet-Skripte mehr. Eine Datei, 12 KB.
 
 - `stock.js` — Quelldatei (bearbeiten)
-- `stock.min.js` — minifiziert, wird in Webflow geladen (7,9 KB)
-
-Einbindung wie beim Cart-Skript über jsDelivr, festgepinnt auf einen Tag:
+- `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v1.0.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.0/stock.min.js
 ```
 
 ---
@@ -24,77 +21,112 @@ Ein Push auf `main` allein ändert live nichts.
 
 ## Was in Webflow zu tun ist
 
-**Auf `/stockfotos-videos` (Seiten-Einstellungen → Vor `</body>`):**
+**Auf `/stockfotos-videos`, vor `</body>`, diese Blöcke ersatzlos löschen:**
 
-Diese vier Blöcke **löschen**:
+1. `@finsweet/attributes@2/attributes.js` (das `fs-list`-Skript)
+2. `@finsweet/attributes-cmsfilter@1/cmsfilter.js`
+3. `@finsweet/attributes-cmsload@1/cmsload.js`
+4. Den `history.replaceState`-Blocker („Verhindert nur beim ersten Laden …")
+5. Das „Filterwerte aus der URL übernehmen"-Snippet
+6. Das Hover-Video-Snippet
+7. `hideLastIfDotsBefore()` — die Auslassungspunkte macht das Skript selbst
 
-1. `<script ... @finsweet/attributes@2/attributes.js ... fs-list>` — lädt ~25 Dateien
-   nach und hat auf dieser Seite nichts zu tun (die Seite nutzt durchgehend die
-   v1-Attribute `fs-cmsfilter-*` / `fs-cmsload-*`, kein einziges `fs-list-*`).
-2. `<script ... attributes-cmsfilter@1 ...>` und `<script ... attributes-cmsload@1 ...>`
-   — die lädt das neue Skript selbst nach, zum richtigen Zeitpunkt.
-3. Den `history.replaceState`-Blocker („Verhindert nur beim ersten Laden …").
-4. Das „Filterwerte aus der URL übernehmen"-Snippet **und** das Hover-Video-Snippet.
-
-Danach steht dort nur noch:
+Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v1.0.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.0/stock.min.js"></script>
 ```
 
-**Auf `/stockmedien/[slug]` (Teaser-Seiten):** dort fehlen die Finsweet-Skripte
-komplett — deshalb sind die Blätter-Buttons dort tote Links (`href="#"`), der
-native „Zurück"-Pfeil taucht wieder auf und Seite 2 lädt falsch. Dieselbe eine
-Zeile einfügen, dann verhalten sich beide Seiten identisch.
+**Bleiben darf und soll:** das Grid-Skript (`setGrid`/`cc-stock-tmb`), Cookie-Consent,
+Cart-Skript, GA. Das Grid-Skript hängt an einem eigenen MutationObserver und
+bekommt neue Karten automatisch mit; zusätzlich feuert dieses Skript
+`window.dispatchEvent(new CustomEvent("kl:rendered", { detail: { items } }))`.
 
-Am einfachsten: die Zeile in die **Site-weiten** Einstellungen legen. Das Skript
-prüft selbst, ob die Seite eine CMS-Liste hat, und tut sonst nichts.
+**Auf `/stockmedien/[slug]`** dieselbe Zeile einfügen — dort fehlten die Skripte
+bisher komplett (deshalb tote `href="#"`-Blätter-Buttons, sichtbarer nativer
+Zurück-Pfeil, falsch ladende Folgeseiten). Am einfachsten: Zeile in die
+**Site-weiten** Einstellungen. Ohne Collection-Liste tut das Skript nichts.
 
-**Im Designer nichts umbauen nötig.** Das Skript entfernt `fs-cmsfilter-showquery`
-und `fs-cmsload-element="scroll-anchor"` zur Laufzeit selbst, bevor Finsweet
-startet — beide Automatiken übernimmt es kontrolliert.
+**Im Designer nichts umbauen.** Die vorhandenen `fs-…`-Attribute werden als reine
+Datenattribute weiterverwendet (Finsweet ist nur noch ein Namensschema im
+Markup, keine Abhängigkeit). Jedes hat ein neutrales Gegenstück, falls du später
+umbenennen willst — beide Schreibweisen funktionieren gleichzeitig:
+
+| bisher | Alternative |
+|---|---|
+| `fs-cmsfilter-element="list"` | `data-kl-list` |
+| `fs-cmsfilter-element="filters"` | `data-kl-filters` |
+| `fs-cmsfilter-field="kategorie"` | `data-kl-field="kategorie"` |
+| `fs-cmsload-element="page-button"` | `data-kl-page-button` |
+| `fs-cmsload-element="page-dots"` | `data-kl-page-dots` |
+| `fs-cmsload-element="loader"` | `data-kl-loader` |
 
 ---
 
-## Was es löst
+## Der entscheidende Unterschied: wann geladen wird
+
+Finsweet muss für „Blättern **und** Filtern" den ganzen Katalog kennen und holt
+ihn deshalb bei **jedem** Seitenaufruf komplett: gemessen **30 Anfragen, ~1,9 MB**,
+jede ~730 ms — bevor irgendjemand gefiltert hat.
+
+Dieses Skript unterscheidet:
+
+| Aktion | Kosten |
+|---|---|
+| Seite öffnen | **0 Anfragen** — Seite 1 steht bereits im HTML |
+| Blättern | **1 Anfrage** pro Seite (~64 KB), danach im Speicher |
+| Seitenzahl bestimmen | **~9 Anfragen einmal pro Sitzung**, im Hintergrund (siehe unten) |
+| Filtern/Suchen | erst dann der ganze Katalog, **einmal**, mit Ladeanzeige |
+
+**Warum überhaupt eine Suche nach der Seitenzahl?** Webflow schreibt die
+Gesamtzahl nirgends ins HTML (kein `rel="next"`, und Bereichs-Anfragen
+beantwortet der CDN mit dem vollen Dokument). Statt alle 30 Seiten zu holen,
+sucht das Skript das Ende per Sprungsuche: 2, 4, 8, 16, 32 … bis eine Seite leer
+ist, dann halbieren — **9 statt 30 Abrufe**, und jede dabei geholte Seite bleibt
+im Speicher (Blättern dorthin kostet später nichts). Das Ergebnis liegt 30 Minuten
+in der `sessionStorage`, gilt also für die ganze Sitzung inklusive
+Detailseiten-Besuchen.
+
+---
+
+## Was sonst gelöst ist
 
 | Problem | Lösung |
 |---|---|
-| Seite lädt langsam | Finsweet wird erst im Leerlauf geladen. Vorher: 30 Anfragen / ~1,9 MB Katalog-HTML **vor** dem ersten Bild. Gemessen im Prüfstand: Katalog-Nachladen startet jetzt erst ~2 s nach `load`. |
-| ~25 überflüssige Anfragen | Attributes v2 fliegt raus (kein einziges `fs-list-*`-Attribut auf der Seite). |
-| Hover-Video tot nach Filtern/Blättern | Bindung ist wiederholbar und läuft nach jedem Rendern erneut (`data-kl-hover` verhindert Doppel-Listener). Zusätzlich ein MutationObserver als Netz. |
-| Video-Metadaten für alle Karten | Werden erst geholt, wenn die Karte in Sichtweite kommt (`preload="none"` → `metadata` per IntersectionObserver). |
-| Kein Playback auf Mobile | Auf Touch-Geräten spielt automatisch das Video, das mittig im Bild steht — immer nur eines. |
-| Ankersprung beim Filtern | Passiert nicht mehr. Gesprungen wird **nur** beim Blättern. |
-| Anker springt auf Mobile falsch | Ziel wird **nach** dem Rendern gemessen (2 Frames) und eine fixe/klebende Kopfleiste wird abgezogen. |
-| `?kategorie=…` von der Detailseite lädt nicht immer | Eigene, deterministische Übernahme aus der URL beim Laden (inkl. Webflow-Checkbox-Optik) — nicht mehr Finsweets `showquery` gegen ein eigenes Snippet. |
-| URL wird unsauber | Beim Filtern wird `?kategorie=…&typ=…&lizenz=…&tags=…` geschrieben, sonst nichts. Zurück-Taste wird unterstützt. |
+| Hover-Video tot nach Filtern/Blättern | Bindung läuft nach jedem Rendern erneut (`data-kl-hover` verhindert Doppel-Listener) |
+| Video-Metadaten für alle Karten | erst bei Sichtnähe (`preload="none"` → `metadata` per IntersectionObserver) |
+| Kein Playback auf Mobile | Video der mittig sichtbaren Karte spielt automatisch, immer nur eines |
+| Ankersprung beim Filtern | passiert nicht mehr — gesprungen wird **nur** beim Blättern |
+| Anker mobil an falscher Stelle | Ziel wird **nach** dem Rendern gemessen, fixe/klebende Kopfleiste wird abgezogen |
+| `?kategorie=…` von der Detailseite | wird beim Laden übernommen, inklusive Webflow-Checkbox-Optik |
+| unsaubere URLs | geschrieben werden nur `?kategorie=&typ=&lizenz=&ausrichtung=&tags=` (+ Seitenzahl); Zurück-Taste funktioniert |
+| Umlaute in der Suche | „Städte" findet „staedte" und umgekehrt |
 
 ---
 
-## Prüfstand
+## Prüfstand (gegen eine 1:1-Kopie der Staging-Seite, echte Karten)
 
-`stock.js` wurde gegen eine 1:1-Kopie der Staging-Seite getestet (lokaler Server,
-echte Finsweet-Skripte, echte Karten):
+- Start: **0** Katalog-Abrufe, 100/100 Karten mit Hover verdrahtet
+- Seitenzahl: **31 gefunden mit 9 Abrufen**, in `sessionStorage` gemerkt
+- Blättern auf Seite 2: 0 zusätzliche Abrufe (lag schon im Speicher), echte
+  Seite-2-Inhalte, genau **ein** Scroll, aktive Zahl markiert, Leiste
+  `[1][2][3][…][31]`
+- Filter „Tiere": lädt einmal nach, **alle 100 gezeigten Karten sind Tiere**,
+  403 Treffer auf 5 Seiten, **kein** Scrollsprung
+- Suche „strand" kombiniert mit Filter → `?kategorie=tiere&tags=strand`, 31 Treffer
+- Unsinns-Suche → Leerhinweis, Blätter-Leiste leer
+- Zurück-Taste → Filter, Checkbox und Suchfeld wiederhergestellt
 
-- Finsweet-Nachladen: `cmsfilter.js` erst bei 6,7 s statt sofort; Katalog-Fetches
-  ab 6,8 s statt vor dem ersten Bild
-- Hover-Bindung: 100/100 Karten, auch nach Filter und Seitenwechsel
-- `?kategorie=tiere` beim Laden → Chip aktiv, nur Tier-Motive (Screenshot geprüft)
-- Klick auf Kategorie → `?kategorie=…`, **kein** Scrollsprung
-- Klick auf Seite 2/3/4 → genau ein Scroll auf den Anker (Ziel 496 px bei Anker 508 px)
-
-Hinweis zum Testen im Hintergrund-Tab: dort laufen weder `requestAnimationFrame`
-noch `behavior: "smooth"` — der Scroll wirkt dann wirkungslos, obwohl der Code
-stimmt. Im Prüfstand wurde deshalb der `scrollTo`-Aufruf abgefangen statt das
-Ergebnis gemessen.
+Beim Testen im Hintergrund-Tab laufen weder `requestAnimationFrame` noch
+`behavior:"smooth"` — Scroll-Prüfungen dort über das Abfangen von `scrollTo`.
 
 ---
 
 ## Debug
 
 ```js
-window.__klStockDebug = true;   // vor dem Skript setzen → Log, wann Finsweet lädt
-window.klStock.zustand();       // { finsweetGestartet, karten, gebunden, videos, touch }
-window.klStock.startFinsweet(); // sofort nachladen
+window.__klStockDebug = true;   // vor dem Skript setzen
+window.klStock.zustand();       // Seite, Seitenzahl, geladene Seiten, Treffer, Bindungen
+window.klStock.geheZuSeite(5);
+window.klStock.alleHolen();     // Katalog vorladen
 ```

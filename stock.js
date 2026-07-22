@@ -1,249 +1,414 @@
 /*!
- * kataloop-stock.js — Stock-Collection (Fotos & Videos)
+ * kataloop-stock.js v2.0.0
+ * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
- * Ein Skript für ALLE Seiten mit einer Finsweet-CMS-Liste (Stockfotos/-Videos,
- * Stockmedien-Teaser, Kategorie-Seiten). Es ersetzt:
+ * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
+ *                       + die drei eigenen Snippets (History-Blocker,
+ *                         URL-Übernahme, Hover-Video)
+ * Keine externe Abhängigkeit. Eine Datei, ~9 KB.
  *
- *   - das Hover-Video-Snippet
- *   - das „URL-Filter übernehmen"-Snippet
- *   - den history.replaceState-Blocker
- *   - das Finsweet-Attributes-v2-Skript (auf diesen Seiten wirkungslos)
+ * WARUM EIGENER CODE STATT FINSWEET
+ * Finsweet lädt für „Blättern + Filtern" beim Seitenaufruf ALLE CMS-Seiten
+ * nach — auf /stockfotos-videos gemessen: 30 Anfragen, ~1,9 MB, jede ~730 ms,
+ * bevor überhaupt gefiltert wurde. Diese Engine lädt bedarfsgerecht:
+ *   - nur blättern      → genau EINE Seite pro Klick (~64 KB)
+ *   - filtern/suchen    → dann erst der ganze Katalog, einmal, mit Ladeanzeige
+ * Dazu volle Kontrolle über URL, Scrollen und Video.
  *
- * Was es tut:
- *   1. LADEZEIT  — lädt Finsweet (cmsfilter + cmsload) erst, wenn es gebraucht
- *      wird. Ohne das zieht die Seite beim Aufruf den KOMPLETTEN Katalog als
- *      HTML nach (gemessen: 30 Anfragen / ~1,9 MB), bevor überhaupt etwas
- *      passiert. Jetzt: Seite 1 sofort sichtbar, der Rest kommt im Leerlauf
- *      oder bei der ersten Filter-/Seiten-Interaktion.
- *   2. HOVER-VIDEO — bindet sich an JEDE Karte, auch an nachgeladene und
- *      neu gefilterte (das war der Fehler der alten Fassung: einmalig beim
- *      DOMContentLoaded gebunden → nach Filter/Seitenwechsel tot).
- *   3. MOBILE — auf Touch-Geräten spielt das Video der Karte, die gerade
- *      mittig im Bild steht (immer nur EINES gleichzeitig).
- *   4. SCROLL — springt NUR beim Blättern nach oben, nicht beim Filtern,
- *      und mit korrektem Abstand unter der (mobilen) Kopfleiste.
- *   5. URL — hält ?kategorie=…&typ=…&lizenz=…&tags=… und die Filter synchron,
- *      in beide Richtungen, auch bei Zurück/Vorwärts im Browser.
+ * MARKUP
+ * Es werden die vorhandenen Attribute weiterverwendet, damit im Designer
+ * NICHTS umgebaut werden muss. Jedes Attribut hat ein neutrales Gegenstück,
+ * falls du später umbenennen willst:
+ *   fs-cmsfilter-element="list"     →  data-kl-list        (Collection-Wrapper)
+ *   fs-cmsfilter-element="filters"  →  data-kl-filters     (Filter-Formular)
+ *   fs-cmsfilter-field="kategorie"  →  data-kl-field="…"   (Wert-Träger)
+ *   fs-cmsload-element="page-button"→  data-kl-page-button (Vorlage für Zahlen)
+ *   fs-cmsload-element="page-dots"  →  data-kl-page-dots
+ *   fs-cmsload-element="loader"     →  data-kl-loader
+ * Beide Schreibweisen funktionieren gleichzeitig.
  *
- * Einbindung (Webflow → Seiten- oder Site-Einstellungen, VOR </body>):
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v1.0.0/stock.min.js"></script>
- * Sonst nichts mehr — die alten Snippets ersatzlos löschen.
+ * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.0/stock.min.js"></script>
  *
- * Das Skript prüft selbst, ob die Seite eine Finsweet-Liste hat. Auf allen
- * anderen Seiten tut es nichts (kein Fehler, keine Kosten).
+ * Ereignis für eigene Skripte (z. B. das Grid-Skript):
+ *   window.addEventListener("kl:rendered", e => e.detail.items)
  */
 (function () {
   "use strict";
 
-  /* ───────────────────────── Einstellungen ───────────────────────── */
   var CFG = {
-    // Finsweet v1 — wird bei Bedarf nachgeladen (Reihenfolge zählt)
-    fsScripts: [
-      "https://cdn.jsdelivr.net/npm/@finsweet/attributes-cmsfilter@1/cmsfilter.js",
-      "https://cdn.jsdelivr.net/npm/@finsweet/attributes-cmsload@1/cmsload.js"
-    ],
-    idleDelay: 1200,          // ms nach dem load-Event, dann Finsweet im Leerlauf holen
-    // Filter, die in der URL auftauchen dürfen: URL-Parameter → fs-cmsfilter-field
-    urlFields: { kategorie: "kategorie", typ: "typ", lizenz: "lizenz" },
-    searchParam: "tags",      // Suchfeld ↔ ?tags=
-    searchId: "Search",
-    scrollExtra: 12,          // zusätzlicher Abstand unter der Kopfleiste (px)
-    videoSelector: ".hover-video",
-    linkSelector: ".u-link-cover",
-    cardSelector: ".card",
-    mobileAutoplay: true,     // Touch: Video der mittigen Karte spielen
-    preloadMargin: "600px"    // so früh werden Video-Metadaten geholt
+    suchFeldId: "Search",          // Eingabefeld der Volltextsuche
+    urlFelder: ["kategorie", "typ", "lizenz", "ausrichtung"], // Filter, die in die URL dürfen
+    suchParam: "tags",             // Suchbegriff ↔ ?tags=
+    randSeiten: 1,                 // wie viele Zahlen um die aktuelle Seite
+    scrollExtra: 12,               // Abstand unter der Kopfleiste
+    ladeGleichzeitig: 4,           // parallele Seiten-Abrufe
+    aktivKlasse: "w--current",     // Klasse der aktiven Seitenzahl
+    videoVorladen: "600px"         // ab dieser Nähe Video-Metadaten holen
   };
 
-  /* ───────────────────────── kleine Helfer ───────────────────────── */
   var d = document;
   var qs = function (s, r) { return (r || d).querySelector(s); };
   var qsa = function (s, r) { return Array.prototype.slice.call((r || d).querySelectorAll(s)); };
-  var isTouch = !window.matchMedia("(hover: hover)").matches;
-  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var saveData = !!(navigator.connection && navigator.connection.saveData);
-  function fire(el, type) { try { el.dispatchEvent(new Event(type, { bubbles: true })); } catch (e) {} }
-  function idle(fn, delay) {
-    if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: delay + 2000 });
-    else setTimeout(fn, delay);
+  var log = function () { if (window.__klStockDebug) console.log.apply(console, ["[kl-stock]"].concat([].slice.call(arguments))); };
+
+  /* ── Grundelemente ─────────────────────────────────────────────── */
+  var listWrap = qs('[fs-cmsfilter-element="list"], [fs-cmsload-element="list"], [data-kl-list]');
+  if (!listWrap) return;                                  // keine Liste → nichts zu tun
+  var itemsBox = qs(".w-dyn-items", listWrap) || listWrap;
+  var filterForm = qs('[fs-cmsfilter-element="filters"], [data-kl-filters]');
+  var suchFeld = d.getElementById(CFG.suchFeldId);
+  var loader = qs('[fs-cmsload-element="loader"], [data-kl-loader]');
+  var dotsTmpl = qs('[fs-cmsload-element="page-dots"], [data-kl-page-dots]');
+  var btnTmpl = qs('[fs-cmsload-element="page-button"], [data-kl-page-button]');
+  var zahlenBox = btnTmpl ? btnTmpl.parentElement : null;
+  var weiterBtn = qs(".w-pagination-next");
+  var zurueckBtn = qs(".w-pagination-previous");
+
+  /* Finsweet-Automatiken abschalten, falls die Skripte doch noch irgendwo
+     hängen: ohne diese Attribute fasst Finsweet die Liste nicht an. */
+  qsa("[fs-cmsfilter-showquery], [fs-cmsload-mode], [fs-cmsload-resetix]").forEach(function (el) {
+    el.removeAttribute("fs-cmsfilter-showquery");
+    el.removeAttribute("fs-cmsload-mode");
+    el.removeAttribute("fs-cmsload-resetix");
+  });
+  qsa('[fs-cmsload-element="scroll-anchor"]').forEach(function (el) {
+    el.setAttribute("data-kl-anchor", "");
+    el.removeAttribute("fs-cmsload-element");
+  });
+
+  /* ── Text-Normalisierung (Umlaute, Interpunktion) ──────────────── */
+  function norm(s) {
+    var t = (s || "").toLowerCase()
+      .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss");
+    if (t.normalize) t = t.normalize("NFD").replace(/[̀-ͯ]/g, "");  // Akzente weg
+    return t.replace(/[^a-z0-9]+/g, " ").trim();
   }
 
-  /* Gibt es hier überhaupt eine CMS-Liste? Sonst sofort raus. */
-  var listEl = qs('[fs-cmsfilter-element="list"], [fs-cmsload-element="list"]');
-  if (!listEl) return;
+  /* ── Datenmodell ───────────────────────────────────────────────── */
+  var seiten = {};            // Seitenzahl → Array von Item-Objekten
+  var alleGeladen = false;    // wurden alle Seiten geholt?
+  var ladeVersprechen = null;
+  var seite = 1;
+  var proSeite = 0;
+  var gesamtSeiten = 1;
+  var pagParam = "";          // z. B. "e19e26fd_page"
 
-  /* ═══════════════════════ 1) Finsweet nachladen ═══════════════════════
-     Finsweet startet sofort und lädt bei „pagination + filter" ALLE
-     CMS-Seiten im Hintergrund. Das ist der mit Abstand größte Kostenpunkt
-     der Seite. Wir verschieben ihn hinter den ersten Bildaufbau. */
-  var fsStarted = false;
-
-  function startFinsweet(grund) {
-    if (fsStarted) return;
-    fsStarted = true;
-    if (window.__klStockDebug) console.log("[kl-stock] Finsweet laden:", grund);
-
-    /* Zwei Finsweet-Automatiken abschalten, BEVOR die Skripte laufen —
-       wir machen beides selbst und kontrolliert:
-         showquery   → Finsweet schreibt/liest die URL nach eigenem Schema
-         scroll-anchor → Finsweet scrollt nach JEDEM Rendern (auch beim Filtern) */
-    qsa("[fs-cmsfilter-showquery]").forEach(function (el) { el.removeAttribute("fs-cmsfilter-showquery"); });
-    qsa('[fs-cmsload-element="scroll-anchor"]').forEach(function (el) {
-      el.setAttribute("data-kl-anchor", "");            // merken: das ist unser Sprungziel
-      el.removeAttribute("fs-cmsload-element");
+  function feldWerte(el) {
+    var map = {};
+    qsa("[fs-cmsfilter-field], [data-kl-field]", el).forEach(function (f) {
+      var namen = (f.getAttribute("fs-cmsfilter-field") || f.getAttribute("data-kl-field") || "")
+        .split(",").map(function (n) { return n.trim().toLowerCase(); }).filter(Boolean);
+      var wert = (f.textContent || "").trim();
+      if (!wert) return;
+      namen.forEach(function (n) { (map[n] = map[n] || []).push(wert); });
     });
+    return map;
+  }
 
-    CFG.fsScripts.forEach(function (src) {
-      var s = d.createElement("script");
-      s.src = src;
-      s.async = false;                                   // Reihenfolge beibehalten
-      d.head.appendChild(s);
+  function bauItem(el) {
+    var felder = feldWerte(el);
+    var such = [];
+    for (var k in felder) such.push(felder[k].join(" "));
+    var norm2 = {};
+    for (var f in felder) norm2[f] = felder[f].map(function (v) { return v.trim().toLowerCase(); });
+    return { el: el, felder: norm2, such: norm(such.join(" ")) };
+  }
+
+  /* Seite 1 steht bereits im HTML (gut für SEO und den ersten Aufbau). */
+  seiten[1] = qsa(":scope > .w-dyn-item", itemsBox).map(bauItem);
+  if (!seiten[1].length) seiten[1] = qsa(".w-dyn-item", itemsBox).map(bauItem);
+  proSeite = seiten[1].length || 1;
+
+  /* Seitenzahl + Parameter aus der vorhandenen Blätter-Leiste lesen. */
+  (function ermittlePaginierung() {
+    var href = (weiterBtn && weiterBtn.getAttribute("href")) || "";
+    var m = href.match(/[?&]([^=]*_page)=(\d+)/);
+    if (m) pagParam = m[1];
+    var zahlen = qsa('[fs-cmsload-element="page-button"], [data-kl-page-button]')
+      .map(function (b) { return parseInt(b.textContent.trim(), 10); })
+      .filter(function (n) { return !isNaN(n); });
+    qsa("a[href*='_page=']").forEach(function (a) {
+      var mm = a.getAttribute("href").match(/[?&]([^=]*_page)=(\d+)/);
+      if (mm) { pagParam = pagParam || mm[1]; zahlen.push(parseInt(mm[2], 10)); }
     });
+    gesamtSeiten = zahlen.length ? Math.max.apply(null, zahlen) : 1;
+    log("Paginierung:", pagParam, "Seiten:", gesamtSeiten, "pro Seite:", proSeite);
+  })();
+
+  /* ── Nachladen ─────────────────────────────────────────────────── */
+  function ladeAnzeige(an) {
+    if (loader) loader.style.display = an ? "" : "none";
+    listWrap.setAttribute("aria-busy", an ? "true" : "false");
   }
 
-  /* Sofort, wenn die URL schon einen Filter oder eine Seite mitbringt … */
-  var params = new URLSearchParams(location.search);
-  var hasFilterParam = Object.keys(CFG.urlFields).some(function (p) { return params.has(p); }) ||
-                       params.has(CFG.searchParam) ||
-                       Array.prototype.some.call(params.keys(), function (k) { return /_page$/.test(k); });
+  var hatWeiter = {};         // Seitenzahl → gibt es eine Folgeseite?
 
-  /* … sonst bei der ersten Berührung von Filter, Suche oder Blätter-Leiste … */
-  function armInteraction() {
-    var zonen = ['[fs-cmsfilter-element="filters"]', ".pagination-wrapper", ".w-pagination-wrapper", "#" + CFG.searchId];
-    var handler = function (e) {
-      if (zonen.some(function (z) { return e.target.closest && e.target.closest(z); })) startFinsweet("Interaktion");
-    };
-    ["pointerdown", "keydown", "focusin"].forEach(function (t) {
-      d.addEventListener(t, handler, { capture: true, passive: true });
-    });
+  function seiteHolen(n) {
+    if (seiten[n]) return Promise.resolve(seiten[n]);
+    if (!pagParam) return Promise.resolve([]);
+    var u = new URL(location.href);
+    u.searchParams.set(pagParam, String(n));
+    return fetch(u.toString(), { credentials: "same-origin" })
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var box = qs('[fs-cmsfilter-element="list"] .w-dyn-items, [fs-cmsload-element="list"] .w-dyn-items, [data-kl-list] .w-dyn-items', doc);
+        var items = box ? qsa(":scope > .w-dyn-item", box).map(function (el) { return bauItem(d.importNode(el, true)); }) : [];
+        seiten[n] = items;
+        hatWeiter[n] = !!qs(".w-pagination-next", doc);
+        return items;
+      })
+      .catch(function (e) { log("Seite", n, "fehlgeschlagen", e); seiten[n] = []; hatWeiter[n] = false; return []; });
   }
 
-  if (hasFilterParam) startFinsweet("URL-Parameter");
-  else {
-    armInteraction();
-    /* … und spätestens im Leerlauf, damit späteres Filtern sofort reagiert. */
-    if (d.readyState === "complete") idle(function () { startFinsweet("Leerlauf"); }, CFG.idleDelay);
-    else window.addEventListener("load", function () {
-      setTimeout(function () { idle(function () { startFinsweet("Leerlauf"); }, CFG.idleDelay); }, CFG.idleDelay);
-    });
+  /* ── Wie viele Seiten gibt es? ──────────────────────────────────
+     Webflow schreibt die Gesamtzahl NICHT ins HTML (kein rel="next", und
+     Range-Anfragen beantwortet der CDN mit dem vollen Dokument). Statt wie
+     Finsweet alle 30 Seiten zu holen, suchen wir das Ende: 2, 4, 8, 16, 32 …
+     bis eine Seite leer ist, danach halbieren. Das sind ~6-9 Abrufe statt 30,
+     sie laufen im Hintergrund, und jede geholte Seite bleibt im Speicher —
+     für späteres Blättern oder Filtern ist sie damit schon da.
+     Das Ergebnis liegt in der sessionStorage: pro Sitzung also EINMAL. */
+  var gesamtSicher = false;
+  var schluessel = "kl-stock-seiten:" + location.pathname;
+
+  function ausSpeicher() {
+    try {
+      var roh = sessionStorage.getItem(schluessel);
+      if (!roh) return 0;
+      var o = JSON.parse(roh);
+      if (Date.now() - o.t > 30 * 60 * 1000) return 0;      // nach 30 min neu prüfen
+      return o.n || 0;
+    } catch (e) { return 0; }
+  }
+  function inSpeicher(n) {
+    try { sessionStorage.setItem(schluessel, JSON.stringify({ n: n, t: Date.now() })); } catch (e) {}
   }
 
-  /* ═══════════════════════ 2) Hover-Video ═══════════════════════
-     Wichtig gegenüber der alten Fassung:
-       - erneut aufrufbar (Filter/Blättern erzeugen NEUE Karten)
-       - data-kl-hover verhindert doppelte Listener
-       - spielt auch, wenn die Metadaten noch nicht da sind (canplay)
-       - Metadaten werden erst geholt, wenn die Karte in Sichtnähe kommt */
-  var metaObserver = "IntersectionObserver" in window
-    ? new IntersectionObserver(function (entries) {
-        entries.forEach(function (en) {
-          if (!en.isIntersecting) return;
-          var v = en.target;
-          if (v.preload !== "metadata") v.preload = "metadata";
-          metaObserver.unobserve(v);
-        });
-      }, { rootMargin: CFG.preloadMargin })
-    : null;
+  function gesamtErmitteln() {
+    if (gesamtSicher || !pagParam) return Promise.resolve(gesamtSeiten);
+    var gemerkt = ausSpeicher();
+    if (gemerkt) { gesamtSeiten = gemerkt; gesamtSicher = true; return Promise.resolve(gesamtSeiten); }
 
-  function prepareVideo(v) {
-    v.muted = true;                       // Property UND Attribut (Firefox/iOS)
-    v.setAttribute("muted", "");
-    v.setAttribute("playsinline", "");
-    v.setAttribute("webkit-playsinline", "");
-    v.removeAttribute("controls");
-    if (metaObserver && !saveData) {      // spart Anfragen beim ersten Aufbau
-      v.preload = "none";
-      metaObserver.observe(v);
-    } else {
-      v.preload = "metadata";
-    }
-  }
-
-  function playVideo(v) {
-    var go = function () {
-      var p = v.play();
-      if (p && p.catch) p.catch(function () {
-        v.muted = true; v.setAttribute("muted", "");
-        var again = v.play();
-        if (again && again.catch) again.catch(function () {});
+    var lo = 1, hi = 0;
+    function pruefe(n) {
+      return seiteHolen(n).then(function (items) {
+        return { leer: items.length === 0, weiter: !!hatWeiter[n] };
       });
-    };
-    if (v.readyState >= 2) { go(); return; }
-    var once = function () { v.removeEventListener("canplay", once); go(); };
-    v.addEventListener("canplay", once, { once: true });
-    if (v.preload === "none") v.preload = "metadata";
-    if (v.readyState < 2) v.load();
+    }
+    function hoch(n) {
+      if (n > 4096) { hi = n; return Promise.resolve(); }
+      return pruefe(n).then(function (r) {
+        if (r.leer) { hi = n; return; }                      // zu weit
+        lo = n;
+        if (!r.weiter) { hi = n + 1; return; }               // genau die letzte Seite
+        return hoch(n * 2);
+      });
+    }
+    function binaer() {
+      if (hi - lo <= 1) return Promise.resolve();
+      var m = Math.floor((lo + hi) / 2);
+      return pruefe(m).then(function (r) {
+        if (r.leer) hi = m; else { lo = m; if (!r.weiter) hi = m + 1; }
+        return binaer();
+      });
+    }
+    return hoch(2).then(binaer).then(function () {
+      gesamtSeiten = Math.max(1, lo);
+      gesamtSicher = true;
+      inSpeicher(gesamtSeiten);
+      log("Seitenzahl ermittelt:", gesamtSeiten, "| geholte Seiten:", Object.keys(seiten).length);
+      if (!istGefiltert()) paginationBauen(gesamtSeiten);
+      return gesamtSeiten;
+    });
   }
 
-  function stopVideo(v) {
-    try { v.pause(); v.currentTime = 0; } catch (e) {}
+  /* Alle Seiten holen — nur nötig, sobald wirklich gefiltert wird. */
+  function alleHolen() {
+    if (alleGeladen) return Promise.resolve();
+    if (ladeVersprechen) return ladeVersprechen;
+    if (!gesamtSicher) {                       // erst wissen, wie viele Seiten es sind
+      ladeAnzeige(true);
+      return (ladeVersprechen = gesamtErmitteln().then(function () {
+        ladeVersprechen = null; return alleHolen();
+      }));
+    }
+    ladeAnzeige(true);
+    var offen = [];
+    for (var n = 2; n <= gesamtSeiten; n++) if (!seiten[n]) offen.push(n);
+    log("hole", offen.length, "Seiten");
+    var i = 0;
+    function naechste() {
+      if (i >= offen.length) return Promise.resolve();
+      return seiteHolen(offen[i++]).then(naechste);
+    }
+    var spuren = [];
+    for (var s = 0; s < CFG.ladeGleichzeitig; s++) spuren.push(naechste());
+    ladeVersprechen = Promise.all(spuren).then(function () {
+      alleGeladen = true; ladeVersprechen = null; ladeAnzeige(false);
+    });
+    return ladeVersprechen;
   }
 
-  function initHoverVideo(scope) {
-    qsa(CFG.linkSelector, scope || d).forEach(function (link) {
-      if (link.dataset.klHover) return;
-      link.dataset.klHover = "1";
-      var card = link.closest(CFG.cardSelector);
-      if (!card) return;
-      var v = qs(CFG.videoSelector, card);
-      if (!v) return;
-      prepareVideo(v);
-      if (reduced) return;                // kein automatisches Abspielen
-      if (!isTouch) {
-        link.addEventListener("mouseenter", function () { playVideo(v); });
-        link.addEventListener("mouseleave", function () { stopVideo(v); });
-        link.addEventListener("focusin", function () { playVideo(v); });
-        link.addEventListener("focusout", function () { stopVideo(v); });
+  function alleItems() {
+    var out = [];
+    for (var n = 1; n <= gesamtSeiten; n++) if (seiten[n]) out = out.concat(seiten[n]);
+    return out;
+  }
+
+  /* ── Filter lesen ──────────────────────────────────────────────── */
+  function steuerungen(feld) {
+    if (!filterForm) return [];
+    return qsa('[fs-cmsfilter-field="' + feld + '"], [data-kl-field="' + feld + '"]', filterForm)
+      .map(function (w) {
+        var label = w.closest("label");
+        var input = label && label.querySelector('input[type="checkbox"], input[type="radio"]');
+        return input ? { input: input, label: label, wert: (w.textContent || "").trim().toLowerCase() } : null;
+      }).filter(Boolean);
+  }
+
+  function aktiveFilter() {
+    var f = {};
+    CFG.urlFelder.forEach(function (feld) {
+      var an = steuerungen(feld).filter(function (s) { return s.input.checked; })
+        .map(function (s) { return s.wert; });
+      if (an.length) f[feld] = an;
+    });
+    return f;
+  }
+
+  function suchBegriffe() {
+    var v = suchFeld ? suchFeld.value.trim() : "";
+    return v ? norm(v).split(" ").filter(Boolean) : [];
+  }
+
+  function istGefiltert() {
+    return Object.keys(aktiveFilter()).length > 0 || suchBegriffe().length > 0;
+  }
+
+  function treffer() {
+    var f = aktiveFilter(), begriffe = suchBegriffe(), felder = Object.keys(f);
+    return alleItems().filter(function (it) {
+      for (var i = 0; i < felder.length; i++) {
+        var soll = f[felder[i]], hat = it.felder[felder[i]] || [];
+        var ok = false;
+        for (var j = 0; j < soll.length; j++) if (hat.indexOf(soll[j]) !== -1) { ok = true; break; }
+        if (!ok) return false;                       // Gruppen sind UND-verknüpft
       }
+      for (var k = 0; k < begriffe.length; k++) {    // alle Suchwörter müssen vorkommen
+        if (it.such.indexOf(begriffe[k]) === -1) return false;
+      }
+      return true;
     });
-    if (isTouch) refreshMobileVideos(scope);
   }
 
-  /* ═══════════════════════ 3) Mobile: mittige Karte spielt ═══════════════════════
-     Auf Touch-Geräten gibt es kein Hover. Statt „Antippen startet" (verschluckt
-     den ersten Tap auf den Link) spielt automatisch das Video, das gerade am
-     weitesten mittig im Bild steht — immer nur eines. */
-  var mobileObserver = null;
-  var mobileCurrent = null;
-
-  function refreshMobileVideos(scope) {
-    if (!CFG.mobileAutoplay || reduced || saveData || !("IntersectionObserver" in window)) return;
-    if (!mobileObserver) {
-      mobileObserver = new IntersectionObserver(pickMobileVideo, {
-        threshold: [0, 0.35, 0.6, 0.9],
-        rootMargin: "-15% 0px -15% 0px"       // „mittiger Streifen" des Bildschirms
-      });
+  /* ── Rendern ───────────────────────────────────────────────────── */
+  var leerHinweis = null;
+  function zeigeLeer(an, text) {
+    if (an && !leerHinweis) {
+      leerHinweis = d.createElement("div");
+      leerHinweis.className = "w-dyn-empty kl-empty";
+      leerHinweis.setAttribute("role", "status");
+      leerHinweis.textContent = text || "Keine Treffer. Bitte Filter oder Suchbegriff anpassen.";
+      itemsBox.parentNode.insertBefore(leerHinweis, itemsBox.nextSibling);
     }
-    qsa(CFG.videoSelector, scope || d).forEach(function (v) {
-      if (v.dataset.klMobile) return;
-      v.dataset.klMobile = "1";
-      mobileObserver.observe(v);
+    if (leerHinweis) leerHinweis.style.display = an ? "" : "none";
+    itemsBox.style.display = an ? "none" : "";
+  }
+
+  function render(liste, seitenZahl) {
+    var frag = d.createDocumentFragment();
+    liste.forEach(function (it) { frag.appendChild(it.el); });
+    itemsBox.textContent = "";
+    itemsBox.appendChild(frag);
+    zeigeLeer(liste.length === 0);
+    paginationBauen(seitenZahl);
+    videosBinden(itemsBox);
+    /* Webflow-Interaktionen für neu eingehängte Karten neu anmelden. */
+    try { if (window.Webflow && window.Webflow.require) window.Webflow.require("ix2").init(); } catch (e) {}
+    window.dispatchEvent(new CustomEvent("kl:rendered", { detail: { items: liste.map(function (i) { return i.el; }) } }));
+  }
+
+  function zeichne(scrollen) {
+    var gefiltert = istGefiltert();
+    if (!gefiltert) {
+      /* Ungefiltert: genau EINE Seite holen statt des ganzen Katalogs. */
+      ladeAnzeige(!seiten[seite]);
+      seiteHolen(seite).then(function (items) {
+        ladeAnzeige(false);
+        render(items, Math.max(gesamtSeiten, 1));
+        if (scrollen) nachObenScrollen();
+      });
+      return;
+    }
+    alleHolen().then(function () {
+      var t = treffer();
+      var seitenZahl = Math.max(1, Math.ceil(t.length / proSeite));
+      if (seite > seitenZahl) seite = 1;
+      render(t.slice((seite - 1) * proSeite, seite * proSeite), seitenZahl);
+      if (scrollen) nachObenScrollen();
     });
   }
 
-  function pickMobileVideo() {
-    var mitte = window.innerHeight / 2;
-    var best = null, bestDist = Infinity;
-    qsa(CFG.videoSelector).forEach(function (v) {
-      var r = v.getBoundingClientRect();
-      if (r.bottom < 0 || r.top > window.innerHeight) return;
-      var sichtbar = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
-      if (sichtbar < r.height * 0.5) return;             // mindestens halb im Bild
-      var dist = Math.abs((r.top + r.bottom) / 2 - mitte);
-      if (dist < bestDist) { bestDist = dist; best = v; }
+  /* ── Blätter-Leiste ────────────────────────────────────────────── */
+  function paginationBauen(gesamt) {
+    if (!zahlenBox || !btnTmpl) return;
+    qsa(".kl-page", zahlenBox).forEach(function (e) { e.remove(); });
+    if (gesamt <= 1) {
+      if (weiterBtn) weiterBtn.style.display = "none";
+      if (zurueckBtn) zurueckBtn.style.display = "none";
+      return;
+    }
+    var zeigen = [];
+    for (var n = 1; n <= gesamt; n++) {
+      if (n === 1 || n === gesamt || Math.abs(n - seite) <= CFG.randSeiten) zeigen.push(n);
+    }
+    var vorher = 0;
+    zeigen.forEach(function (n) {
+      if (vorher && n - vorher > 1 && dotsTmpl) {
+        var pt = dotsTmpl.cloneNode(true);
+        pt.classList.add("kl-page");
+        pt.removeAttribute("fs-cmsload-element");
+        pt.style.display = "";
+        zahlenBox.appendChild(pt);
+      }
+      var b = btnTmpl.cloneNode(true);
+      b.classList.add("kl-page");
+      b.removeAttribute("fs-cmsload-element");
+      b.style.display = "";
+      var innen = b.firstElementChild || b;
+      innen.textContent = String(n);
+      b.setAttribute("href", "?" + pagParam + "=" + n);
+      b.classList.toggle(CFG.aktivKlasse, n === seite);
+      if (n === seite) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+      b.addEventListener("click", function (e) { e.preventDefault(); geheZuSeite(n); });
+      zahlenBox.appendChild(b);
+      vorher = n;
     });
-    if (best === mobileCurrent) return;
-    if (mobileCurrent) stopVideo(mobileCurrent);
-    mobileCurrent = best;
-    if (best) playVideo(best);
+    btnTmpl.style.display = "none";
+    if (dotsTmpl) dotsTmpl.style.display = "none";
+    if (weiterBtn) {
+      weiterBtn.style.display = seite < gesamt ? "" : "none";
+      weiterBtn.setAttribute("href", "?" + pagParam + "=" + Math.min(seite + 1, gesamt));
+    }
+    if (zurueckBtn) {
+      zurueckBtn.style.display = seite > 1 ? "" : "none";
+      zurueckBtn.setAttribute("href", "?" + pagParam + "=" + Math.max(seite - 1, 1));
+    }
   }
 
-  /* ═══════════════════════ 4) Scrollen nur beim Blättern ═══════════════════════ */
-  var scrollNachRender = false;
+  function geheZuSeite(n) {
+    seite = n;
+    urlSchreiben();
+    zeichne(true);
+  }
 
-  function headerHoehe() {
-    /* Höhe einer fixierten/klebenden Kopfleiste messen — auf Mobile ist sie
-       oft höher/anders als auf Desktop, deshalb messen statt raten. */
+  if (weiterBtn) weiterBtn.addEventListener("click", function (e) { e.preventDefault(); geheZuSeite(seite + 1); });
+  if (zurueckBtn) zurueckBtn.addEventListener("click", function (e) { e.preventDefault(); geheZuSeite(Math.max(1, seite - 1)); });
+
+  /* ── Scrollen: nur beim Blättern ───────────────────────────────── */
+  function kopfHoehe() {
     var h = 0;
     qsa("header, .navbar, [data-nav], .w-nav").forEach(function (el) {
       var st = getComputedStyle(el);
@@ -254,206 +419,182 @@
     return h;
   }
 
-  function scrollToList() {
-    var ziel = qs("[data-kl-anchor]") || listEl.closest("section") || listEl;
-    /* Erst NACH dem Rendern messen: die Liste hat gerade ihre Höhe geändert.
-       Zwei Frames warten, sonst springt man auf eine veraltete Position —
-       genau der Fehler auf Mobile. */
+  function nachObenScrollen() {
+    var ziel = qs("[data-kl-anchor]") || listWrap.closest("section") || listWrap;
+    /* Erst nach dem Layout messen — sonst springt man auf eine veraltete
+       Position (das war der Fehler auf Mobile). */
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
-        var y = ziel.getBoundingClientRect().top + window.pageYOffset - headerHoehe() - CFG.scrollExtra;
-        window.scrollTo({ top: Math.max(0, y), behavior: reduced ? "auto" : "smooth" });
+        var y = ziel.getBoundingClientRect().top + window.pageYOffset - kopfHoehe() - CFG.scrollExtra;
+        var weich = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollTo({ top: Math.max(0, y), behavior: weich ? "smooth" : "auto" });
       });
     });
   }
 
-  d.addEventListener("click", function (e) {
-    var t = e.target.closest && e.target.closest(
-      '[fs-cmsload-element="page-button"], .w-pagination-next, .w-pagination-previous, .pagination a'
-    );
-    if (!t) return;
-    startFinsweet("Blättern");
-    scrollNachRender = true;
-    /* Notnagel: kommt binnen 900 ms keine Render-Meldung (andere Finsweet-
-       Instanzart, Seite schon im Cache), trotzdem nach oben. */
-    setTimeout(function () {
-      if (scrollNachRender) { scrollNachRender = false; scrollToList(); }
-    }, 900);
-  }, true);
+  /* ── URL ↔ Filter ──────────────────────────────────────────────── */
+  var sperre = false;
 
-  /* ═══════════════════════ 5) URL ↔ Filter ═══════════════════════
-     Ein Weg rein (Seitenaufruf, Zurück-Taste), ein Weg raus (Filterwechsel).
-     Kein history-Blocker mehr: der hat Finsweet die eigene Zustandsführung
-     zerschossen (verschwundene Blätter-Buttons, halb geladene Seiten). */
-
-  /* Ein Filter-Steuerelement = Webflow-Checkbox-Label mit verstecktem
-     [fs-cmsfilter-field="…"]-Element, das den Wert trägt. */
-  function filterSteuerungen(feld) {
-    var form = qs('[fs-cmsfilter-element="filters"]') || d;
-    return qsa('[fs-cmsfilter-field="' + feld + '"]', form)
-      .map(function (wert) {
-        var label = wert.closest("label");
-        var input = label && label.querySelector('input[type="checkbox"], input[type="radio"]');
-        return input ? { input: input, label: label, wert: (wert.textContent || "").trim().toLowerCase() } : null;
-      })
-      .filter(Boolean);
-  }
-
-  function setzeCheckbox(steuerung, an) {
-    if (steuerung.input.checked === an) return false;
-    steuerung.input.checked = an;
-    /* Webflow zeichnet die Box als DIV daneben — ohne diese Klasse sieht der
-       Filter „aus", obwohl er aktiv ist. */
-    var box = steuerung.label.querySelector(".w-checkbox-input");
+  function setzeBox(s, an) {
+    if (s.input.checked === an) return false;
+    s.input.checked = an;
+    var box = s.label.querySelector(".w-checkbox-input");   // Webflow zeichnet die Box als DIV
     if (box) box.classList.toggle("w--redirected-checked", an);
-    fire(steuerung.input, "input");
-    fire(steuerung.input, "change");
     return true;
   }
 
-  var schreibsperre = false;
-
-  function ausUrlUebernehmen() {
+  function urlLesen() {
     var p = new URLSearchParams(location.search);
-    var geaendert = false;
-    schreibsperre = true;
-
-    Object.keys(CFG.urlFields).forEach(function (param) {
-      var feld = CFG.urlFields[param];
-      var gewuenscht = (p.get(param) || "").split(",")
-        .map(function (v) { return v.trim().toLowerCase(); })
-        .filter(Boolean);
-      filterSteuerungen(feld).forEach(function (s) {
-        geaendert = setzeCheckbox(s, gewuenscht.indexOf(s.wert) !== -1) || geaendert;
-      });
+    sperre = true;
+    CFG.urlFelder.forEach(function (feld) {
+      var soll = (p.get(feld) || "").split(",").map(function (v) { return v.trim().toLowerCase(); }).filter(Boolean);
+      steuerungen(feld).forEach(function (s) { setzeBox(s, soll.indexOf(s.wert) !== -1); });
     });
-
-    var suche = d.getElementById(CFG.searchId);
-    var suchwert = p.get(CFG.searchParam) || "";
-    if (suche && suche.value !== suchwert) {
-      suche.value = suchwert;
-      fire(suche, "input"); fire(suche, "change");
-      geaendert = true;
-    }
-
-    schreibsperre = false;
-    return geaendert;
+    if (suchFeld) suchFeld.value = p.get(CFG.suchParam) || "";
+    var sn = parseInt(p.get(pagParam) || "1", 10);
+    seite = isNaN(sn) || sn < 1 ? 1 : sn;
+    sperre = false;
   }
 
-  function inUrlSchreiben() {
-    if (schreibsperre) return;
-    var p = new URLSearchParams(location.search);
-    /* Finsweet-eigene Parameter nicht anfassen (Seitenzahl), unsere neu setzen. */
-    Object.keys(CFG.urlFields).forEach(function (param) {
-      var werte = filterSteuerungen(CFG.urlFields[param])
-        .filter(function (s) { return s.input.checked; })
-        .map(function (s) { return s.wert; });
-      if (werte.length) p.set(param, werte.join(","));
-      else p.delete(param);
+  function urlSchreiben() {
+    if (sperre) return;
+    var p = new URLSearchParams();
+    CFG.urlFelder.forEach(function (feld) {
+      var an = steuerungen(feld).filter(function (s) { return s.input.checked; }).map(function (s) { return s.wert; });
+      if (an.length) p.set(feld, an.join(","));
     });
-    var suche = d.getElementById(CFG.searchId);
-    if (suche && suche.value.trim()) p.set(CFG.searchParam, suche.value.trim());
-    else p.delete(CFG.searchParam);
-
+    if (suchFeld && suchFeld.value.trim()) p.set(CFG.suchParam, suchFeld.value.trim());
+    if (seite > 1) p.set(pagParam, String(seite));
     var neu = location.pathname + (p.toString() ? "?" + p.toString() : "") + location.hash;
-    if (neu !== location.pathname + location.search + location.hash) {
-      history.replaceState(history.state, "", neu);
-    }
+    if (neu !== location.pathname + location.search + location.hash) history.pushState({ kl: 1 }, "", neu);
   }
 
-  var schreibTimer = null;
-  d.addEventListener("change", function (e) {
-    if (!e.target.closest || !e.target.closest('[fs-cmsfilter-element="filters"]')) return;
-    startFinsweet("Filterwechsel");
-    clearTimeout(schreibTimer);
-    schreibTimer = setTimeout(inUrlSchreiben, 60);
-  }, true);
-  d.addEventListener("input", function (e) {
-    if (!e.target || e.target.id !== CFG.searchId) return;
-    startFinsweet("Suche");
-    clearTimeout(schreibTimer);
-    schreibTimer = setTimeout(inUrlSchreiben, 300);     // Tippen abwarten
-  }, true);
-
-  window.addEventListener("popstate", function () {
-    if (!fsStarted) startFinsweet("Zurück-Taste");
-    ausUrlUebernehmen();
-  });
-
-  /* ═══════════════════════ Anbindung an Finsweet ═══════════════════════ */
-  var hydriert = false;
-
-  function nachRender(scope) {
-    initHoverVideo(scope);
-    if (scrollNachRender) { scrollNachRender = false; scrollToList(); }
-  }
-
-  window.fsAttributes = window.fsAttributes || [];
-  window.fsAttributes.push(["cmsfilter", function (instanzen) {
-    instanzen.forEach(function (inst) {
-      if (inst._klBound) return;
-      inst._klBound = true;
-      var li = inst.listInstance;
-      if (li && li.on) li.on("renderitems", function () {
-        nachRender((li.list || li.listElement || d));
-      });
+  var tippTimer = null;
+  if (filterForm) {
+    filterForm.addEventListener("change", function (e) {
+      if (!e.target.closest("label")) return;
+      seite = 1; urlSchreiben(); zeichne(false);          // Filtern scrollt NICHT
     });
-    if (!hydriert) {
-      hydriert = true;
-      /* Filter aus der URL setzen und einmal anwenden. */
-      if (ausUrlUebernehmen()) {
-        setTimeout(function () {
-          instanzen.forEach(function (i) { if (i.applyFilters) i.applyFilters(false); });
-        }, 0);
-      }
-    }
-  }]);
-  window.fsAttributes.push(["cmsload", function (instanzen) {
-    instanzen.forEach(function (inst) { nachRender(inst.list || inst.listElement || d); });
-    /* Nachgeladene Seiten kommen als neue Items: erneut binden. */
-    instanzen.forEach(function (inst) {
-      if (inst._klLoadBound || !inst.on) return;
-      inst._klLoadBound = true;
-      inst.on("renderitems", function () { nachRender(inst.list || inst.listElement || d); });
-    });
-  }]);
-
-  /* Sicherheitsnetz: auch ohne Finsweet (z. B. Teaser-Seiten ohne Filter)
-     sollen Hover-Videos funktionieren, und ein DOM-Wechsel darf uns nicht
-     entkommen. Der Observer ist billig — er reagiert nur auf childList. */
-  function boot() {
-    initHoverVideo(d);
-    if ("MutationObserver" in window) {
-      /* Der Observer ist zugleich das Sicherheitsnetz fürs Scrollen: Finsweet
-         meldet „renderitems" nicht bei jeder Instanz-Art zuverlässig, eine
-         DOM-Änderung in der Liste dagegen schon. Beides läuft über nachRender(),
-         das doppelte Aufrufe selbst abfängt (data-kl-hover / scrollNachRender). */
-      var mo = new MutationObserver(function (muts) {
-        for (var i = 0; i < muts.length; i++) {
-          if (muts[i].addedNodes && muts[i].addedNodes.length) { nachRender(listEl); break; }
-        }
-      });
-      mo.observe(listEl, { childList: true, subtree: true });
-    }
+    filterForm.addEventListener("submit", function (e) { e.preventDefault(); });
   }
-  if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", boot);
-  else boot();
+  if (suchFeld) {
+    suchFeld.addEventListener("input", function () {
+      clearTimeout(tippTimer);
+      tippTimer = setTimeout(function () { seite = 1; urlSchreiben(); zeichne(false); }, 250);
+    });
+  }
+  window.addEventListener("popstate", function () { urlLesen(); zeichne(false); });
 
-  /* Für die Fehlersuche: window.__klStockDebug = true; vor dem Skript setzen. */
+  /* ── Hover-Video ───────────────────────────────────────────────── */
+  var beruehrung = !window.matchMedia("(hover: hover)").matches;
+  var wenigerBewegung = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var datenSparen = !!(navigator.connection && navigator.connection.saveData);
+
+  var metaBeobachter = "IntersectionObserver" in window ? new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      if (e.target.preload !== "metadata") e.target.preload = "metadata";
+      metaBeobachter.unobserve(e.target);
+    });
+  }, { rootMargin: CFG.videoVorladen }) : null;
+
+  function abspielen(v) {
+    var los = function () {
+      var p = v.play();
+      if (p && p.catch) p.catch(function () {
+        v.muted = true; v.setAttribute("muted", "");
+        var n = v.play(); if (n && n.catch) n.catch(function () {});
+      });
+    };
+    if (v.readyState >= 2) return los();
+    v.addEventListener("canplay", function once() { v.removeEventListener("canplay", once); los(); }, { once: true });
+    if (v.preload === "none") v.preload = "metadata";
+    if (v.readyState < 2) v.load();
+  }
+  function anhalten(v) { try { v.pause(); v.currentTime = 0; } catch (e) {} }
+
+  function videosBinden(scope) {
+    qsa(".u-link-cover", scope || d).forEach(function (link) {
+      if (link.dataset.klHover) return;
+      link.dataset.klHover = "1";
+      var card = link.closest(".card");
+      var v = card && qs(".hover-video", card);
+      if (!v) return;
+      v.muted = true;
+      v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); v.setAttribute("webkit-playsinline", "");
+      v.removeAttribute("controls");
+      if (metaBeobachter && !datenSparen) { v.preload = "none"; metaBeobachter.observe(v); }
+      else v.preload = "metadata";
+      if (wenigerBewegung || beruehrung) return;
+      link.addEventListener("mouseenter", function () { abspielen(v); });
+      link.addEventListener("mouseleave", function () { anhalten(v); });
+      link.addEventListener("focusin", function () { abspielen(v); });
+      link.addEventListener("focusout", function () { anhalten(v); });
+    });
+    if (beruehrung) mobileBinden(scope);
+  }
+
+  /* Mobile: das Video der Karte spielt, die gerade mittig im Bild steht. */
+  var mobilBeobachter = null, mobilAktuell = null;
+  function mobileBinden(scope) {
+    if (wenigerBewegung || datenSparen || !("IntersectionObserver" in window)) return;
+    if (!mobilBeobachter) {
+      mobilBeobachter = new IntersectionObserver(mobileWaehlen, { threshold: [0, 0.35, 0.6, 0.9], rootMargin: "-15% 0px -15% 0px" });
+    }
+    qsa(".hover-video", scope || d).forEach(function (v) {
+      if (v.dataset.klMobil) return;
+      v.dataset.klMobil = "1";
+      mobilBeobachter.observe(v);
+    });
+  }
+  function mobileWaehlen() {
+    var mitte = window.innerHeight / 2, best = null, nah = Infinity;
+    qsa(".hover-video").forEach(function (v) {
+      var r = v.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+      var sicht = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+      if (sicht < r.height * 0.5) return;
+      var dist = Math.abs((r.top + r.bottom) / 2 - mitte);
+      if (dist < nah) { nah = dist; best = v; }
+    });
+    if (best === mobilAktuell) return;
+    if (mobilAktuell) anhalten(mobilAktuell);
+    mobilAktuell = best;
+    if (best) abspielen(best);
+  }
+
+  /* ── Start ─────────────────────────────────────────────────────── */
+  function start() {
+    ladeAnzeige(false);
+    urlLesen();
+    videosBinden(d);
+    /* Nur neu rendern, wenn die URL etwas verlangt — sonst bleibt das
+       server-gerenderte Seite-1-Markup unangetastet stehen (schnellster Start). */
+    if (istGefiltert() || seite !== 1) zeichne(false);
+    else paginationBauen(gesamtSeiten);
+    /* Seitenzahl im Hintergrund ermitteln — blockiert nichts und macht die
+       Blätter-Leiste vollständig. Ergebnis gilt für die ganze Sitzung. */
+    var spaeter = function () { gesamtErmitteln(); };
+    if (window.requestIdleCallback) requestIdleCallback(spaeter, { timeout: 4000 });
+    else setTimeout(spaeter, 2000);
+    log("bereit", { seiten: gesamtSeiten, proSeite: proSeite, param: pagParam });
+  }
+  if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", start);
+  else start();
+
   window.klStock = {
-    version: "1.0.0",
-    startFinsweet: startFinsweet,
-    initHoverVideo: initHoverVideo,
-    ausUrlUebernehmen: ausUrlUebernehmen,
-    inUrlSchreiben: inUrlSchreiben,
+    version: "2.0.0",
     zustand: function () {
       return {
-        finsweetGestartet: fsStarted,
-        karten: qsa(CFG.linkSelector).length,
-        gebunden: qsa(CFG.linkSelector + "[data-kl-hover]").length,
-        videos: qsa(CFG.videoSelector).length,
-        touch: isTouch
+        seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
+        alleGeladen: alleGeladen, geladeneSeiten: Object.keys(seiten).length,
+        gefiltert: istGefiltert(), treffer: istGefiltert() && alleGeladen ? treffer().length : null,
+        karten: qsa(".u-link-cover").length,
+        gebunden: qsa(".u-link-cover[data-kl-hover]").length
       };
-    }
+    },
+    geheZuSeite: geheZuSeite,
+    zeichne: zeichne,
+    alleHolen: alleHolen
   };
 })();
