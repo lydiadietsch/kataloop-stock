@@ -1,5 +1,5 @@
 /*!
- * kataloop-stock.js v3.4.0
+ * kataloop-stock.js v3.5.0
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
@@ -39,6 +39,8 @@
  * Sichtbarkeits-Grundzustand bleiben in Webflow. Texte darin werden befüllt:
  *   data-kl-text="suche"    der Suchbegriff
  *   data-kl-text="anzahl"   die Trefferzahl (nur wenn sie feststeht)
+ *   data-kl-text="auswahl"  Suchbegriff UND angehakte Filter, lesbar
+ * Die Auswahl steht ausserdem als data-kl-auswahl am <html>.
  * Der Suchbegriff steht zusätzlich als data-kl-suche am <html> — Code-
  * Komponenten im Shadow DOM lesen ihn von dort selbst.
  *
@@ -57,7 +59,7 @@
  * Hat die Vorlage inneres Markup, bekommt [data-kl-vorschlag-text] den Text.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.4.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.5.0/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -83,7 +85,8 @@
     verstecktKlasse: "u-d-none",   // Webflow-Klasse, mit der Status-Hüllen versteckt sind
     seitenAnfangId: "nav-top",     // Scrollziel für „Neue Suche starten"
     ladenAbMs: 250,                // so lange muss geladen werden, bis „laden" gemeldet wird
-    vorschlaegeMax: 4              // so viele Gegenvorschläge höchstens
+    vorschlaegeMax: 4,             // so viele Gegenvorschläge höchstens
+    blendenMs: 300                 // Ein-/Ausblenden der Status-Hüllen
   };
 
   var d = document;
@@ -257,7 +260,13 @@
        das Design sie. Die Klasse .kl-laedt und aria-busy bleiben am
        Listen-Wrapper, damit man sich anhängen kann. */
     ".kl-suchhinweis{position:absolute;transform:translateY(-50%);pointer-events:none;" +
-      "font-size:.72em;letter-spacing:.02em;opacity:.45;transition:opacity .15s;white-space:nowrap}";
+      "font-size:.72em;letter-spacing:.02em;opacity:.45;transition:opacity .15s;white-space:nowrap}" +
+    /* Status-Huellen blenden weich ein und aus, statt zu springen. display
+       laesst sich nicht animieren - deshalb erst sichtbar schalten, dann die
+       Deckkraft fahren, und beim Ausblenden umgekehrt. */
+    "[data-kl-zeigen]{transition:opacity " + CFG.blendenMs + "ms linear}" +
+    "[data-kl-zeigen].kl-aus{opacity:0}" +
+    "@media (prefers-reduced-motion: reduce){[data-kl-zeigen]{transition:none}}";
   d.head.appendChild(stil);
 
   /* Die alte Webflow-Ladeanzeige wird EINMAL versteckt und nie wieder
@@ -407,13 +416,22 @@
       });
     }
 
+    /* Ausgeschaltet wird die Ladeanzeige nur von dem Lauf, der sie auch
+       eingeschaltet hat. Sonst passiert Folgendes: laeuft das Vorladen schon,
+       haengt sich eine Suche per `return ladeVersprechen` daran; der
+       Hintergrund-Abschluss meldete dann „fertig", BEVOR der Vordergrund neu
+       gezeichnet hat — fuer einen Moment stand der Zaehler noch auf 0 und der
+       Leerhinweis erschien. Ungebremst war das ein einziger Frame und damit
+       unsichtbar; mit dem weichen Blenden wurden daraus 300 ms. */
     ladeVersprechen = naechste().then(function () {
       alleGeladen = true; gesamtSicher = true; ladeVersprechen = null;
       inSpeicher(gesamtSeiten);
-      ladeAnzeige(false);
+      if (!hintergrund) ladeAnzeige(false);
       log("Katalog vollständig:", gesamtSeiten, "Seiten");
     }, function (e) {
-      ladeVersprechen = null; ladeAnzeige(false); log("Katalog-Fehler", e);
+      ladeVersprechen = null;
+      if (!hintergrund) ladeAnzeige(false);
+      log("Katalog-Fehler", e);
     });
     return ladeVersprechen;
   }
@@ -436,7 +454,11 @@
       .map(function (w) {
         var label = w.closest("label");
         var input = label && label.querySelector('input[type="checkbox"], input[type="radio"]');
-        return input ? { input: input, label: label, wert: (w.textContent || "").trim().toLowerCase() } : null;
+        /* `wert` bleibt kleingeschrieben (Logik/URL), `text` ist die
+           Beschriftung, wie sie dasteht - die zeigen wir der Nutzerin. */
+        return input ? { input: input, label: label,
+                         wert: (w.textContent || "").trim().toLowerCase(),
+                         text: (w.textContent || "").trim() } : null;
       }).filter(Boolean);
   }
 
@@ -690,6 +712,38 @@
   var laufendeGesamt = null;      // Treffer insgesamt, null = noch unbekannt
   var laufendeSeiten = 1;
 
+  /* -- Huellen weich schalten ------------------------------------
+     display:none laesst sich nicht animieren. Beim Einblenden wird deshalb
+     zuerst die Versteckt-Klasse genommen, der Startzustand (durchsichtig) per
+     Reflow festgeschrieben und dann die Deckkraft gefahren; beim Ausblenden
+     erst die Deckkraft, danach display:none. Ohne den Reflow springt es ohne
+     Uebergang - der Browser fasst beide Aenderungen sonst zusammen.
+     Ein laufender Ausblend-Timer wird abgebrochen, wenn die Huelle vorher
+     wieder gebraucht wird; bei kurzen Ladephasen passiert genau das. */
+  var AUS = "kl-aus";
+  var blendTimer = new WeakMap();
+
+  function huelleSchalten(el, an) {
+    var t = blendTimer.get(el);
+    if (t) { clearTimeout(t); blendTimer.delete(el); }
+    var offen = !el.classList.contains(CFG.verstecktKlasse);
+    if (an) {
+      if (offen && !el.classList.contains(AUS)) return;      // schon sichtbar
+      el.classList.add(AUS);
+      el.classList.remove(CFG.verstecktKlasse);
+      void el.offsetWidth;
+      el.classList.remove(AUS);
+    } else {
+      if (!offen) return;                                    // schon versteckt
+      el.classList.add(AUS);
+      blendTimer.set(el, setTimeout(function () {
+        el.classList.add(CFG.verstecktKlasse);
+        el.classList.remove(AUS);
+        blendTimer.delete(el);
+      }, CFG.blendenMs));
+    }
+  }
+
   var vorschlagFuer = null;         // für welchen Begriff stehen die Chips gerade?
 
   function statusAktualisieren() {
@@ -702,6 +756,21 @@
     if (begriff) w.setAttribute("data-kl-suche", begriff);
     else w.removeAttribute("data-kl-suche");
     qsa('[data-kl-text="suche"]').forEach(function (el) { el.textContent = begriff; });
+
+    /* Die GANZE aktuelle Auswahl als lesbarer Satz: Suchbegriff zuerst, dann
+       jeder angehakte Filter mit seiner Beschriftung. Der Leerzustand soll
+       zeigen, wonach wirklich gesucht wurde - ein Suchbegriff allein
+       unterschlaegt, dass vielleicht noch eine Kategorie aktiv war. */
+    var auswahl = begriff ? [begriff] : [];
+    CFG.urlFelder.forEach(function (feld) {
+      steuerungen(feld).forEach(function (st) {
+        if (st.input.checked) auswahl.push(st.text);
+      });
+    });
+    var auswahlText = auswahl.join(", ");
+    if (auswahlText) w.setAttribute("data-kl-auswahl", auswahlText);
+    else w.removeAttribute("data-kl-auswahl");
+    qsa('[data-kl-text="auswahl"]').forEach(function (el) { el.textContent = auswahlText; });
     if (laufendeGesamt !== null)
       qsa('[data-kl-text="anzahl"]').forEach(function (el) { el.textContent = String(laufendeGesamt); });
 
@@ -730,8 +799,7 @@
 
     qsa("[data-kl-zeigen]").forEach(function (el) {
       var rolle = el.getAttribute("data-kl-zeigen");
-      var an = rolle === "ende" ? ende : rolle === zustand;
-      el.classList.toggle(CFG.verstecktKlasse, !an);
+      huelleSchalten(el, rolle === "ende" ? ende : rolle === zustand);
     });
 
     /* Gegenvorschläge nur neu bauen, wenn sich der Begriff geändert hat —
@@ -959,11 +1027,19 @@
     });
     if (angewandteSuche) p.set(CFG.suchParam, angewandteSuche);
     if (seite > 1) p.set(pagParam, String(seite));
-    /* URLSearchParams kodiert Kommas als %2C. In einer Query ist das Komma
-       laut RFC 3986 erlaubt — also selbst zusammenbauen, das liest sich besser:
-       ?kategorie=natur,tiere statt ?kategorie=natur%2Ctiere */
+    /* Selbst zusammenbauen, weil encodeURIComponent zwei Dinge unschoen macht:
+       Kommas werden zu %2C (in einer Query laut RFC 3986 erlaubt, also zurueck
+       zum Komma) und Leerzeichen zu %20 (als + viel lesbarer). Beides ist beim
+       Lesen unkritisch: das Skript liest die URL mit URLSearchParams, und das
+       decodiert + laut Formular-Kodierung ohnehin als Leerzeichen. Ein
+       literales Plus im Suchbegriff bleibt %2B und wird nicht verwechselt.
+         ?kategorie=natur,tiere   statt  ?kategorie=natur%2Ctiere
+         ?tags=lorem+ipsum        statt  ?tags=lorem%20ipsum          */
     var teile = [];
-    p.forEach(function (v, k) { teile.push(encodeURIComponent(k) + "=" + encodeURIComponent(v).replace(/%2C/gi, ",")); });
+    p.forEach(function (v, k) {
+      teile.push(encodeURIComponent(k) + "=" +
+                 encodeURIComponent(v).replace(/%2C/gi, ",").replace(/%20/g, "+"));
+    });
     var neu = location.pathname + (teile.length ? "?" + teile.join("&") : "") + location.hash;
     if (neu !== location.pathname + location.search + location.hash) history.pushState({ kl: 1 }, "", neu);
   }
@@ -1188,7 +1264,7 @@
   else start();
 
   window.klStock = {
-    version: "3.4.0",
+    version: "3.5.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,

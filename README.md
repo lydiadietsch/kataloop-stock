@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 17,7 KB (6,8 KB gzip).
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.4.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.5.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.4.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.5.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -74,7 +74,7 @@ umbenennen willst — beide Schreibweisen funktionieren gleichzeitig:
 
 ---
 
-## Statusanzeigen (ab v3.4.0)
+## Statusanzeigen (ab v3.4.0, Blenden ab v3.5.0)
 
 Für die Webflow-Komponenten „Kein Bild gefunden" und „Ende der Liste". Das
 Skript kennt ihre Namen nicht — es meldet nur seinen Zustand, den Rest macht
@@ -86,10 +86,24 @@ Webflow.
 |---|---|
 | `data-kl-liste` | `laden` · `treffer` · `leer` |
 | `data-kl-ende` | gesetzt, sobald die letzte Seite erreicht ist |
+| `data-kl-suche` | der reine Suchbegriff |
+| `data-kl-auswahl` | die **ganze** Auswahl: Suchbegriff, dann jeder angehakte Filter |
+
+`data-kl-auswahl` gibt es, weil der Suchbegriff allein die halbe Wahrheit ist:
+Wer „hund" sucht **und** eine Kategorie angehakt hat, bekommt vielleicht genau
+deshalb nichts — im Leerzustand soll beides stehen. Die Filter erscheinen mit
+ihrer Beschriftung so, wie sie im Designer dasteht (die kleingeschriebene
+Fassung braucht nur die Logik und die URL). Beispiel: `hund, Natur, Video`.
 
 `laden` wird **erst nach 250 ms** gemeldet (`CFG.ladenAbMs`). Eine Anzeige, die
 für 80 ms aufpoppt, sieht genauso billig aus wie ein Ladebalken — und bei
 geladenem Katalog filtert die Liste ohnehin ohne jeden Abruf.
+
+Die Hüllen **blenden weich ein und aus**, 300 ms linear (`CFG.blendenMs`).
+`display` lässt sich nicht animieren, deshalb wird beim Einblenden erst
+sichtbar geschaltet und dann die Deckkraft gefahren, beim Ausblenden
+umgekehrt. Ein laufender Ausblend-Timer bricht ab, wenn die Hülle vorher
+wieder gebraucht wird — bei kurzen Ladephasen passiert genau das.
 
 **Im Designer** kommt um jede Komponente eine Hülle mit ihrer Rolle, versteckt
 über die vorhandene Klasse `u-d-none`:
@@ -111,6 +125,7 @@ richtig herum.
 |---|---|
 | `data-kl-text="suche"` | der Suchbegriff |
 | `data-kl-text="anzahl"` | die Trefferzahl — **nur wenn sie feststeht** |
+| `data-kl-text="auswahl"` | Suchbegriff **und** angehakte Filter, lesbar |
 
 Die Trefferzahl bleibt leer, solange der Katalog lädt: ein Zwischenstand wäre
 schlicht falsch. Ungefiltert steht sie erst, wenn alle Seiten da sind (die
@@ -214,6 +229,8 @@ dieses Skript **danach**.
 | Aktiver Filter bleibt farblos | Die gelbe Optik hängt an `.stock-check-btn.fs-cmsfilter_active` — diese Klasse setzt das Skript jetzt selbst (zusätzlich `.kl-aktiv`), auch beim Laden aus der URL |
 | „Ich klicke und nichts passiert" | Ladebalken über der Liste + ausgegraute Karten **synchron beim Klick** (nach 9 ms gemessen), Treffer werden nach jeder Lade-Welle nachgezogen |
 | Ladebalken über der Liste sah billig aus | Ersatzlos raus — samt Abdunkeln der Karten und der alten Webflow-Ladeanzeige (die wird einmal versteckt und nicht mehr angefasst; sie kann im Designer gelöscht werden). Eine Ladeanzeige gestaltest du jetzt selbst und hängst sie an `data-kl-zeigen="laden"` |
+| Leerzeichen als `%20` in der URL | Wird als `+` geschrieben: `?tags=lorem+ipsum` statt `?tags=lorem%20ipsum`. Beim Lesen unkritisch, `URLSearchParams` decodiert `+` laut Formular-Kodierung ohnehin als Leerzeichen; ein literales Plus bleibt `%2B` und wird nicht verwechselt |
+| Leerhinweis blitzte trotz Fix noch einen Frame | `alleHolen` schaltete die Ladeanzeige nur bei einem Vordergrund-Lauf EIN, am Ende aber immer AUS. Läuft das Vorladen schon, hängt sich eine Suche per `return ladeVersprechen` daran — der Hintergrund-Abschluss meldete Vollzug, bevor der Vordergrund neu gezeichnet hatte, und für einen Frame stand der Zähler auf 0. Unsichtbar, solange hart geschaltet wurde; mit dem weichen Blenden wurden daraus **300 ms sichtbarer Blitzer**. Jetzt schaltet nur aus, wer auch eingeschaltet hat |
 | Leerhinweis blitzte während der Suche auf | `zeichne()` zeigt erst das bereits Geladene — bei einem Begriff, der auf Seite 1 fehlt, sind das 0 Treffer, und der Leerhinweis erschien, obwohl noch geladen wurde. Er kommt jetzt erst, wenn die Ladephase durch ist. Gemessen an einer Kopie der Staging-Seite mit gebremster Leitung: vorher **2.311 ms sichtbar (137 Bilder)**, danach **kein einziges Bild** |
 | „Ende der Liste" stand auf Seite 1 | Beim normalen Seitenaufruf rendert das Skript bewusst nicht neu (Seite 1 kommt fertig vom Server) — die Zähler blieben auf ihren Startwerten und `seite 1 >= 1` ergab „Ende". Der Zustand wird jetzt aus dem ausgelieferten Markup gesetzt, und solange nichts gezählt wurde, wird auch nichts behauptet |
 
