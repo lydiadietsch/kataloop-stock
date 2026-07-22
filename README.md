@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 12 KB.
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.2.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.3.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.2.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.3.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -111,10 +111,13 @@ dieses Skript **danach**.
 | Anker mobil an falscher Stelle | Ziel wird **nach** dem Rendern gemessen, fixe/klebende Kopfleiste wird abgezogen |
 | `?kategorie=…` von der Detailseite | wird beim Laden übernommen, inklusive Webflow-Checkbox-Optik |
 | unsaubere URLs | geschrieben werden nur `?kategorie=&typ=&lizenz=&ausrichtung=&tags=` (+ Seitenzahl); Zurück-Taste funktioniert |
-| Umlaute in der Suche | „Städte" findet „staedte" und umgekehrt |
-| Suche fand „Kaffee" bei „Affe" | Treffer nur noch am **Wortanfang oder Wortende**, nie mitten im Wort. An 500 echten Motiven: „affe" 22 → 8 Treffer, „eis" 343 → 63, jeweils ohne Fehltreffer |
-| „rote Blume" fand „rot, Blume" nicht | leichte Beugungs-Toleranz auf Grundformen (nur ganze Wörter): „blaues meer" 31 → 90 Treffer |
-| falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortanfang/-ende (2) vor Beugung (1) |
+| Umlaute in der Suche | „Städte" findet „staedte" und umgekehrt (`ä→ae`, `ß→ss`, Akzente weg) |
+| „Affe" fand „Waffe", „Waffe" fand „Waffel" | Wortkanten-Treffer brauchen jetzt Substanz: am Wortanfang mindestens 3 Zeichen Rest, am Wortende mindestens 4 davor. An 15 Wortpaaren: **0 Fehler** (vorher 6). Komposita bleiben: „Haus" findet Bauernhaus und Gewächshaus, „Affe" findet Berberaffe — aber nicht Giraffe |
+| „kuste" fand nichts | zweite Umlaut-Stufe (`ae→a`): 1.839 der 8.484 Katalogwörter enthalten aufgelöste Umlaute. „kuste" 0 → **159** Treffer, „grun" 67 → 164, „hauser" 2 → 25 |
+| „Haus" fand „Häuser" nicht | Grundform wird **in beide Richtungen** verglichen — „haus" kürzt sich zu „hau", „haeuser" aber zu „haus". Gilt für alle Umlaut-Plurale (Baum↔Bäume, Stadt↔Städte, Vogel↔Vögel) |
+| „8k" und „50mp" fanden nichts | aus den Pixelmaßen jeder Karte wird ein Suchwort: Videos in K-Klassen, Fotos in Megapixeln. „8k" 0 → 2, „50mp" 0 → **211** |
+| „foodfotografie" fand nichts | Bindestrich-Wörter werden zusätzlich zusammengezogen abgelegt (278 solcher Wörter in 500 Motiven) |
+| falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortkante (2) vor Grundform (1) |
 | Blätter-Leiste sprang auf Seite 31 | gleitendes Fenster aus 5 Zahlen: `1 2 3 4 5 …`, bei Seite 5 dann `… 3 4 5 6 7 …` |
 | Aktiver Filter bleibt farblos | Die gelbe Optik hängt an `.stock-check-btn.fs-cmsfilter_active` — diese Klasse setzt das Skript jetzt selbst (zusätzlich `.kl-aktiv`), auch beim Laden aus der URL |
 | „Ich klicke und nichts passiert" | Ladebalken über der Liste + ausgegraute Karten **synchron beim Klick** (nach 9 ms gemessen), Treffer werden nach jeder Lade-Welle nachgezogen |
@@ -144,6 +147,13 @@ Beim Testen im Hintergrund-Tab laufen weder `requestAnimationFrame` noch
 Suche: `sucheAbEnter: true` in der CFG schaltet das Tippen ab — dann filtert
 erst Enter. Standard ist Live-Suche ab 2 Zeichen, Enter wirkt sofort und
 schließt auf dem Handy die Tastatur.
+
+Der Hinweis „⏎ Enter" im Feld ist **aus** (`enterHinweis: ""`). Grund: Live-
+Filtern kostet gemessen 1,4 ms je Tastendruck und null Netzabrufe — Enter
+erzwingt also nichts, was nicht ohnehin sofort passiert. Ein Hinweis würde eine
+Funktion ankündigen, die es so nicht gibt. Zum Einschalten einen Text eintragen.
+
+**Bauen:** `esbuild stock.js --minify --legal-comments=none --target=es2017 --outfile=stock.min.js`
 
 ```js
 window.__klStockDebug = true;   // vor dem Skript setzen

@@ -1,11 +1,11 @@
 /*!
- * kataloop-stock.js v3.2.0
+ * kataloop-stock.js v3.3.0
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
  *                       + die drei eigenen Snippets (History-Blocker,
  *                         URL-Übernahme, Hover-Video)
- * Keine externe Abhängigkeit. Eine Datei, ~12 KB.
+ * Keine externe Abhängigkeit. Eine Datei, 16,6 KB (6,5 KB gzip).
  *
  * WARUM EIGENER CODE STATT FINSWEET
  * Finsweet lädt für „Blättern + Filtern" beim Seitenaufruf ALLE CMS-Seiten
@@ -28,7 +28,7 @@
  * Beide Schreibweisen funktionieren gleichzeitig.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.2.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.3.0/stock.min.js"></script>
  *
  * Ereignis für eigene Skripte (z. B. das Grid-Skript):
  *   window.addEventListener("kl:rendered", e => e.detail.items)
@@ -43,7 +43,7 @@
     sucheMinZeichen: 2,            // ab so vielen Zeichen wird gesucht
     sucheAbEnter: false,           // true = erst auf Enter suchen, nicht beim Tippen
     sucheVerzoegerungMs: 250,      // Wartezeit nach dem letzten Tastendruck
-    enterHinweis: "⏎ Enter",       // kleiner Hinweis im Suchfeld
+    enterHinweis: "",              // Hinweis im Suchfeld; leer = aus (Live-Suche braucht kein Enter)
     enterHinweisAbstand: 44,       // px vom rechten Feldrand (Platz für die Lupe)
     fensterSeiten: 5,              // so viele Seitenzahlen zeigt die Leiste (gleitendes Fenster)
     scrollExtra: 12,               // Abstand unter der Kopfleiste
@@ -110,12 +110,25 @@
     return w;
   }
   function stammText(t) { return t ? t.split(" ").map(stamm).join(" ") : ""; }
+  /* Zweite Stufe der Umlaut-Behandlung: norm() macht ä→ae, hier wird daraus a.
+     Damit findet „kuste" die Küste und „hauser" die Häuser — 1.839 der 8.484
+     Wörter im Katalog enthalten aufgelöste Umlaute, ohne diese Stufe waren sie
+     für alle unerreichbar, die weder Umlaut noch „ae" tippen. Löst nebenbei die
+     Umlaut-Plurale (Haus↔Häuser, Baum↔Bäume), an denen die Stammform scheitert.
+     Preis: „schon" und „schön" gelten als gleich — bei einer Bildsuche der
+     richtige Tausch. */
+  function flach(t) { return t ? t.replace(/ae/g, "a").replace(/oe/g, "o").replace(/ue/g, "u") : ""; }
   function esc(q) { return q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
-  /* Treffer NUR am Wortanfang oder Wortende — nie mitten im Wort.
-     Gemessen an 500 echten Motiven: „affe" fängt damit 8 statt 22 Treffer
-     (kein Kaffee, kein Zeitraffer), „eis" 63 statt 343 — und Komposita wie
-     Mittelmeer, Kapstadt, Ostsee bleiben trotzdem drin. */
-  function randMuster(t) { return new RegExp("(^| )" + esc(t) + "|" + esc(t) + "( |$)"); }
+  /* Treffer nur als ganzes Wort oder an einer Wortkante — und dort nur, wenn
+     genug übrig bleibt: am Anfang mindestens 3 Zeichen, am Ende mindestens 4.
+     Vorher genügte EIN Zeichen, deshalb fand „Affe" die „Waffe", „Waffe" die
+     „Waffel" und „Eis" den „Kreis". Die Schwelle am Ende ist höher, weil im
+     Deutschen dort das Grundwort steht: „Haus" soll Bauernhaus und Gewächshaus
+     finden, aber „Affe" nicht Giraffe. An 15 Wortpaaren geprüft: 0 Fehler
+     (aus = 6 Fehler, ≥3 = 1, ≥5 = 2). Bekannte Ausreißer im Katalog: „eis"
+     trifft auch Ägäis und Sicherheitshinweis — 2 von 68. */
+  function anfangMuster(t) { return new RegExp("(^| )" + esc(t) + "[a-z0-9]{3,}"); }
+  function endeMuster(t) { return new RegExp("[a-z0-9]{4,}" + esc(t) + "( |$)"); }
   function exaktMuster(t) { return new RegExp("(^| )" + esc(t) + "( |$)"); }
 
   /* ── Datenmodell ───────────────────────────────────────────────── */
@@ -140,14 +153,33 @@
     return map;
   }
 
+  /* Aus den Pixelmaßen ein Wort machen, nach dem Menschen tatsächlich suchen:
+     Videos in K-Klassen (8k, 4k …), Fotos in Megapixeln (50mp). Die Maße stehen
+     ohnehin in jeder Karte — ohne das findet „8k" null Treffer, obwohl 8K-Videos
+     im Katalog liegen. */
+  function massWorte(felder) {
+    var b = parseInt((felder.width || [])[0], 10), h = parseInt((felder.height || [])[0], 10);
+    if (!b || !h) return "";
+    var lang = Math.max(b, h), istVideo = /video/i.test((felder.typ || [])[0] || "");
+    if (istVideo) return lang >= 7680 ? "8k" : lang >= 5120 ? "5k" : lang >= 3840 ? "4k"
+                        : lang >= 2560 ? "2k" : "hd";
+    return Math.round(b * h / 1e6) + "mp";
+  }
+
   function bauItem(el) {
     var felder = feldWerte(el);
     var such = [];
     for (var k in felder) such.push(felder[k].join(" "));
     var norm2 = {};
     for (var f in felder) norm2[f] = felder[f].map(function (v) { return v.trim().toLowerCase(); });
-    var text = norm(such.join(" "));
-    return { el: el, felder: norm2, such: text, stammtext: stammText(text) };
+    var roh = such.join(" ");
+    /* Bindestrich-Wörter zusätzlich zusammengezogen ablegen: norm() macht aus
+       „Food-Fotografie" zwei Wörter, „foodfotografie" fände sie sonst nie.
+       278 solcher Wörter allein in den ersten 500 Motiven. */
+    var zusatz = (roh.match(/[^\s]+-[^\s]+/g) || []).map(function (x) { return norm(x.replace(/-/g, "")); });
+    var text = norm(roh + " " + massWorte(felder)) + (zusatz.length ? " " + zusatz.join(" ") : "");
+    var flachT = flach(text);
+    return { el: el, felder: norm2, such: text, flach: flachT, flachstamm: stammText(flachT) };
   }
 
   /* Seite 1 steht bereits im HTML (gut für SEO und den ersten Aufbau). */
@@ -377,11 +409,15 @@
     /* Muster EINMAL je Suche bauen, nicht je Motiv — bei 3.100 Einträgen
        macht das den Unterschied zwischen flüssig und spürbar. */
     var muster = begriffe.map(function (b) {
-      /* Die Beugungs-Stufe prüft NUR ganze Wörter (auf Stammform).
-         Mit Wortanfang/-ende wäre sie zu weit: „affe"→Stamm „aff", und
-         „Zeitraffer"→„zeitraff" endet auf „aff" — genau der Fehltreffer,
-         den die Suche loswerden soll. */
-      return { exakt: exaktMuster(b), rand: randMuster(b), stamm: exaktMuster(stamm(b)) };
+      /* Drei Stufen, absteigend im Rang: (1) das Wort selbst, (2) Wortanfang
+         mit mindestens 3 Zeichen Rest — das sind die Komposita, (3) Umlaute
+         reduziert und Grundform, jeweils in BEIDE Richtungen verglichen
+         (Frage↔Wort). Erst die beidseitige Prüfung bringt „Haus" mit „Häuser"
+         zusammen: „haus" kürzt sich zu „hau", „haeuser" aber zu „haus". */
+      var fb = flach(b);
+      return { exakt: exaktMuster(b), anfang: anfangMuster(b), ende: endeMuster(b),
+               fExakt: exaktMuster(fb), fAnfang: anfangMuster(fb), fEnde: endeMuster(fb),
+               fStamm: exaktMuster(stamm(fb)) };
     });
 
     var liste = alleItems().filter(function (it) {
@@ -394,8 +430,12 @@
       for (var k = 0; k < muster.length; k++) {      // ALLE Suchwörter müssen vorkommen
         var m = muster[k], p = 0;
         if (m.exakt.test(it.such)) p = 3;            // „blume" = Tag „Blume"
-        else if (m.rand.test(it.such)) p = 2;        // Blumenwiese, Wildblume
-        else if (m.stamm.test(it.stammtext)) p = 1;  // „rote" findet „rot"
+        else if (m.anfang.test(it.such) || m.ende.test(it.such)) p = 2;  // Blumenstrauß, Bauernhaus
+        else if (m.fExakt.test(it.flach) || m.fAnfang.test(it.flach)
+              || m.fEnde.test(it.flach)) p = 2;     // „kuste" → Küste, Küstenlandschaft
+        else if (m.fExakt.test(it.flachstamm)       // Frage ist die Grundform des Wortes
+              || m.fStamm.test(it.flach)            // Grundform der Frage ist das Wort
+              || m.fStamm.test(it.flachstamm)) p = 1;  // beide auf Grundform gleich
         if (!p) return false;
         punkte += p;
       }
@@ -629,19 +669,22 @@
     filterForm.addEventListener("submit", function (e) { e.preventDefault(); });
   }
   if (suchFeld) {
-    /* Kleiner Hinweis im Feld: „⏎ Enter". Er sagt, dass sich die Eingabe
-       bestätigen lässt — auf dem Handy schließt Enter zugleich die Tastatur. */
-    var hinweis = d.createElement("span");
-    hinweis.className = "kl-suchhinweis";
-    hinweis.textContent = CFG.enterHinweis;
-    hinweis.setAttribute("aria-hidden", "true");
-    var feldEltern = suchFeld.parentElement;
-    if (feldEltern) {
+    /* Optionaler Hinweis im Feld. Standardmäßig aus: die Suche filtert live
+       (gemessen 1,4 ms je Tastendruck, null Netzabrufe), Enter erzwingt also
+       nichts — es wendet nur sofort an und schließt auf dem Handy die Tastatur.
+       Ein Hinweis würde eine Funktion ankündigen, die es so nicht gibt.
+       Zum Einschalten in der CFG einen Text eintragen. */
+    var hinweis = null, feldEltern = suchFeld.parentElement;
+    if (CFG.enterHinweis && feldEltern) {
+      hinweis = d.createElement("span");
+      hinweis.className = "kl-suchhinweis";
+      hinweis.textContent = CFG.enterHinweis;
+      hinweis.setAttribute("aria-hidden", "true");
       if (getComputedStyle(feldEltern).position === "static") feldEltern.style.position = "relative";
       feldEltern.appendChild(hinweis);
     }
     var hinweisSetzen = function () {
-      if (!feldEltern) return;
+      if (!hinweis || !feldEltern) return;
       var zeigen = !!suchFeld.value.trim();
       hinweis.style.opacity = zeigen ? "" : "0";
       if (!zeigen) return;
