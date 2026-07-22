@@ -1,5 +1,5 @@
 /*!
- * kataloop-stock.js v3.0.0
+ * kataloop-stock.js v3.2.0
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
@@ -28,7 +28,7 @@
  * Beide Schreibweisen funktionieren gleichzeitig.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.0.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.2.0/stock.min.js"></script>
  *
  * Ereignis für eigene Skripte (z. B. das Grid-Skript):
  *   window.addEventListener("kl:rendered", e => e.detail.items)
@@ -40,7 +40,12 @@
     suchFeldId: "Search",          // Eingabefeld der Volltextsuche
     urlFelder: ["kategorie", "typ", "lizenz", "ausrichtung"], // Filter, die in die URL dürfen
     suchParam: "tags",             // Suchbegriff ↔ ?tags=
-    randSeiten: 1,                 // wie viele Zahlen um die aktuelle Seite
+    sucheMinZeichen: 2,            // ab so vielen Zeichen wird gesucht
+    sucheAbEnter: false,           // true = erst auf Enter suchen, nicht beim Tippen
+    sucheVerzoegerungMs: 250,      // Wartezeit nach dem letzten Tastendruck
+    enterHinweis: "⏎ Enter",       // kleiner Hinweis im Suchfeld
+    enterHinweisAbstand: 44,       // px vom rechten Feldrand (Platz für die Lupe)
+    fensterSeiten: 5,              // so viele Seitenzahlen zeigt die Leiste (gleitendes Fenster)
     scrollExtra: 12,               // Abstand unter der Kopfleiste
     ladeGleichzeitig: 4,           // parallele Seiten-Abrufe
     aktivKlasse: "w--current",     // Klasse der aktiven Seitenzahl
@@ -91,6 +96,28 @@
     return t.replace(/[^a-z0-9]+/g, " ").trim();
   }
 
+  /* Leichte deutsche Grundform: hängt gängige Beugungsendungen ab.
+     „rote"→„rot", „Blumen"→„blum", „Bäume"→„baeum". Bewusst grob — sie soll
+     Beugung überbrücken, nicht Wortbedeutung erraten. Der Nebeneffekt
+     („Reis" trifft auch „Reise") wird über die Rangfolge abgefangen:
+     exakte Treffer stehen oben. */
+  var ENDUNGEN = ["innen", "ern", "en", "er", "es", "em", "in", "e", "n", "s"];
+  function stamm(w) {
+    for (var i = 0; i < ENDUNGEN.length; i++) {
+      var e = ENDUNGEN[i];
+      if (w.length - e.length >= 3 && w.slice(-e.length) === e) return w.slice(0, -e.length);
+    }
+    return w;
+  }
+  function stammText(t) { return t ? t.split(" ").map(stamm).join(" ") : ""; }
+  function esc(q) { return q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  /* Treffer NUR am Wortanfang oder Wortende — nie mitten im Wort.
+     Gemessen an 500 echten Motiven: „affe" fängt damit 8 statt 22 Treffer
+     (kein Kaffee, kein Zeitraffer), „eis" 63 statt 343 — und Komposita wie
+     Mittelmeer, Kapstadt, Ostsee bleiben trotzdem drin. */
+  function randMuster(t) { return new RegExp("(^| )" + esc(t) + "|" + esc(t) + "( |$)"); }
+  function exaktMuster(t) { return new RegExp("(^| )" + esc(t) + "( |$)"); }
+
   /* ── Datenmodell ───────────────────────────────────────────────── */
   var seiten = {};            // Seitenzahl → Array von Item-Objekten
   var alleGeladen = false;    // wurden alle Seiten geholt?
@@ -119,7 +146,8 @@
     for (var k in felder) such.push(felder[k].join(" "));
     var norm2 = {};
     for (var f in felder) norm2[f] = felder[f].map(function (v) { return v.trim().toLowerCase(); });
-    return { el: el, felder: norm2, such: norm(such.join(" ")) };
+    var text = norm(such.join(" "));
+    return { el: el, felder: norm2, such: text, stammtext: stammText(text) };
   }
 
   /* Seite 1 steht bereits im HTML (gut für SEO und den ersten Aufbau). */
@@ -164,7 +192,9 @@
     "@keyframes kl-lauf{0%{background-position:-40% 0}100%{background-position:140% 0}}" +
     ".kl-laedt .w-dyn-items{opacity:.45;transition:opacity .2s}" +
     "[data-kl-filters].kl-warte,[fs-cmsfilter-element='filters'].kl-warte{cursor:progress}" +
-    "@media (prefers-reduced-motion: reduce){.kl-laedt::before{animation:none;background:currentColor;opacity:.4}}";
+    "@media (prefers-reduced-motion: reduce){.kl-laedt::before{animation:none;background:currentColor;opacity:.4}}" +
+    ".kl-suchhinweis{position:absolute;transform:translateY(-50%);pointer-events:none;" +
+      "font-size:.72em;letter-spacing:.02em;opacity:.45;transition:opacity .15s;white-space:nowrap}";
   d.head.appendChild(stil);
 
   function ladeAnzeige(an) {
@@ -331,9 +361,11 @@
     return f;
   }
 
+  var angewandteSuche = "";        // was gerade tatsächlich gefiltert ist
   function suchBegriffe() {
-    var v = suchFeld ? suchFeld.value.trim() : "";
-    return v ? norm(v).split(" ").filter(Boolean) : [];
+    return angewandteSuche
+      ? norm(angewandteSuche).split(" ").filter(function (w) { return w.length >= CFG.sucheMinZeichen; })
+      : [];
   }
 
   function istGefiltert() {
@@ -341,19 +373,40 @@
   }
 
   function treffer() {
-    var f = aktiveFilter(), begriffe = suchBegriffe(), felder = Object.keys(f);
-    return alleItems().filter(function (it) {
+    var f = aktiveFilter(), felder = Object.keys(f), begriffe = suchBegriffe();
+    /* Muster EINMAL je Suche bauen, nicht je Motiv — bei 3.100 Einträgen
+       macht das den Unterschied zwischen flüssig und spürbar. */
+    var muster = begriffe.map(function (b) {
+      /* Die Beugungs-Stufe prüft NUR ganze Wörter (auf Stammform).
+         Mit Wortanfang/-ende wäre sie zu weit: „affe"→Stamm „aff", und
+         „Zeitraffer"→„zeitraff" endet auf „aff" — genau der Fehltreffer,
+         den die Suche loswerden soll. */
+      return { exakt: exaktMuster(b), rand: randMuster(b), stamm: exaktMuster(stamm(b)) };
+    });
+
+    var liste = alleItems().filter(function (it) {
       for (var i = 0; i < felder.length; i++) {
-        var soll = f[felder[i]], hat = it.felder[felder[i]] || [];
-        var ok = false;
+        var soll = f[felder[i]], hat = it.felder[felder[i]] || [], ok = false;
         for (var j = 0; j < soll.length; j++) if (hat.indexOf(soll[j]) !== -1) { ok = true; break; }
-        if (!ok) return false;                       // Gruppen sind UND-verknüpft
+        if (!ok) return false;                       // Filtergruppen sind UND-verknüpft
       }
-      for (var k = 0; k < begriffe.length; k++) {    // alle Suchwörter müssen vorkommen
-        if (it.such.indexOf(begriffe[k]) === -1) return false;
+      var punkte = 0;
+      for (var k = 0; k < muster.length; k++) {      // ALLE Suchwörter müssen vorkommen
+        var m = muster[k], p = 0;
+        if (m.exakt.test(it.such)) p = 3;            // „blume" = Tag „Blume"
+        else if (m.rand.test(it.such)) p = 2;        // Blumenwiese, Wildblume
+        else if (m.stamm.test(it.stammtext)) p = 1;  // „rote" findet „rot"
+        if (!p) return false;
+        punkte += p;
       }
+      it.punkte = punkte;
       return true;
     });
+
+    /* Rangfolge nur bei aktiver Suche: exakte Treffer zuerst. Damit landet
+       bei „Reis" der echte Reis oben und die Reise-Motive darunter. */
+    if (begriffe.length) liste.sort(function (a, b) { return b.punkte - a.punkte; });
+    return liste;
   }
 
   /* ── Rendern ───────────────────────────────────────────────────── */
@@ -425,32 +478,44 @@
       if (zurueckBtn) zurueckBtn.style.display = "none";
       return;
     }
-    var zeigen = [];
-    for (var n = 1; n <= gesamt; n++) {
-      if (n === 1 || n === gesamt || Math.abs(n - seite) <= CFG.randSeiten) zeigen.push(n);
+    /* Gleitendes Fenster aus CFG.fensterSeiten Zahlen um die aktuelle Seite.
+       Bewusst OHNE Sprung auf die letzte Seite: die besten Ergebnisse stehen
+       vorn, ein „31" lädt nur zum Wegspringen ein. Punkte zeigen an, dass davor
+       bzw. dahinter noch mehr kommt.
+         Seite 1  →  1 2 3 4 5 …
+         Seite 5  →  … 3 4 5 6 7 …
+         Seite 31 →  … 27 28 29 30 31          */
+    var fenster = Math.max(1, CFG.fensterSeiten);
+    var start = Math.min(Math.max(1, seite - Math.floor(fenster / 2)), Math.max(1, gesamt - fenster + 1));
+    var ende = Math.min(start + fenster - 1, gesamt);
+
+    var punkte = function () {
+      if (!dotsTmpl) return;
+      var pt = dotsTmpl.cloneNode(true);
+      pt.classList.add("kl-page");
+      pt.removeAttribute("fs-cmsload-element");
+      pt.style.display = "";
+      zahlenBox.appendChild(pt);
+    };
+
+    if (start > 1) punkte();
+    for (var n = start; n <= ende; n++) {
+      (function (nr) {
+        var b = btnTmpl.cloneNode(true);
+        b.classList.add("kl-page");
+        b.removeAttribute("fs-cmsload-element");
+        b.style.display = "";
+        var innen = b.firstElementChild || b;
+        innen.textContent = String(nr);
+        b.setAttribute("href", "?" + pagParam + "=" + nr);
+        b.classList.toggle(CFG.aktivKlasse, nr === seite);
+        if (nr === seite) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+        b.addEventListener("click", function (e) { e.preventDefault(); geheZuSeite(nr); });
+        zahlenBox.appendChild(b);
+      })(n);
     }
-    var vorher = 0;
-    zeigen.forEach(function (n) {
-      if (vorher && n - vorher > 1 && dotsTmpl) {
-        var pt = dotsTmpl.cloneNode(true);
-        pt.classList.add("kl-page");
-        pt.removeAttribute("fs-cmsload-element");
-        pt.style.display = "";
-        zahlenBox.appendChild(pt);
-      }
-      var b = btnTmpl.cloneNode(true);
-      b.classList.add("kl-page");
-      b.removeAttribute("fs-cmsload-element");
-      b.style.display = "";
-      var innen = b.firstElementChild || b;
-      innen.textContent = String(n);
-      b.setAttribute("href", "?" + pagParam + "=" + n);
-      b.classList.toggle(CFG.aktivKlasse, n === seite);
-      if (n === seite) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
-      b.addEventListener("click", function (e) { e.preventDefault(); geheZuSeite(n); });
-      zahlenBox.appendChild(b);
-      vorher = n;
-    });
+    if (ende < gesamt) punkte();
+
     if (weiterBtn) {
       weiterBtn.style.display = seite < gesamt ? "" : "none";
       weiterBtn.setAttribute("href", "?" + pagParam + "=" + Math.min(seite + 1, gesamt));
@@ -528,6 +593,7 @@
       steuerungen(feld).forEach(function (s) { setzeBox(s, soll.indexOf(s.wert) !== -1); });
     });
     if (suchFeld) suchFeld.value = p.get(CFG.suchParam) || "";
+    angewandteSuche = p.get(CFG.suchParam) || "";
     optikSync();
     var sn = parseInt(p.get(pagParam) || "1", 10);
     seite = isNaN(sn) || sn < 1 ? 1 : sn;
@@ -541,7 +607,7 @@
       var an = steuerungen(feld).filter(function (s) { return s.input.checked; }).map(function (s) { return s.wert; });
       if (an.length) p.set(feld, an.join(","));
     });
-    if (suchFeld && suchFeld.value.trim()) p.set(CFG.suchParam, suchFeld.value.trim());
+    if (angewandteSuche) p.set(CFG.suchParam, angewandteSuche);
     if (seite > 1) p.set(pagParam, String(seite));
     /* URLSearchParams kodiert Kommas als %2C. In einer Query ist das Komma
        laut RFC 3986 erlaubt — also selbst zusammenbauen, das liest sich besser:
@@ -563,12 +629,63 @@
     filterForm.addEventListener("submit", function (e) { e.preventDefault(); });
   }
   if (suchFeld) {
+    /* Kleiner Hinweis im Feld: „⏎ Enter". Er sagt, dass sich die Eingabe
+       bestätigen lässt — auf dem Handy schließt Enter zugleich die Tastatur. */
+    var hinweis = d.createElement("span");
+    hinweis.className = "kl-suchhinweis";
+    hinweis.textContent = CFG.enterHinweis;
+    hinweis.setAttribute("aria-hidden", "true");
+    var feldEltern = suchFeld.parentElement;
+    if (feldEltern) {
+      if (getComputedStyle(feldEltern).position === "static") feldEltern.style.position = "relative";
+      feldEltern.appendChild(hinweis);
+    }
+    var hinweisSetzen = function () {
+      if (!feldEltern) return;
+      var zeigen = !!suchFeld.value.trim();
+      hinweis.style.opacity = zeigen ? "" : "0";
+      if (!zeigen) return;
+      hinweis.style.top = (suchFeld.offsetTop + suchFeld.offsetHeight / 2) + "px";
+      hinweis.style.right = (feldEltern.clientWidth - suchFeld.offsetLeft - suchFeld.offsetWidth
+                             + CFG.enterHinweisAbstand) + "px";
+    };
+
+    var suchen = function (sofort) {
+      var wert = suchFeld.value.trim();
+      /* Zu kurz zählt wie leer — sonst zeigt die Liste noch Treffer zu
+         „hund", während im Feld nur „h" steht. */
+      if (wert.length < CFG.sucheMinZeichen) wert = "";
+      if (wert === angewandteSuche) return;
+      angewandteSuche = wert;
+      seite = 1; urlSchreiben(); zeichne(false);
+      hinweisSetzen();
+    };
+
     suchFeld.addEventListener("input", function () {
-      ladeAnzeige(true);
+      hinweisSetzen();
       clearTimeout(tippTimer);
-      tippTimer = setTimeout(function () { seite = 1; urlSchreiben(); zeichne(false); }, 250);
+      if (CFG.sucheAbEnter) {
+        if (!suchFeld.value.trim() && angewandteSuche) suchen(true);   // Leeren wirkt sofort
+        return;
+      }
+      tippTimer = setTimeout(function () { suchen(false); }, CFG.sucheVerzoegerungMs);
     });
+    suchFeld.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        clearTimeout(tippTimer);
+        suchen(true);
+        suchFeld.blur();                                  // schließt die Tastatur auf dem Handy
+      } else if (e.key === "Escape" && suchFeld.value) {
+        suchFeld.value = ""; clearTimeout(tippTimer); suchen(true);
+      }
+    });
+    suchFeld.addEventListener("focus", hinweisSetzen);
+    suchFeld.addEventListener("blur", function () { setTimeout(hinweisSetzen, 120); });
+    window.addEventListener("resize", hinweisSetzen);
+    hinweisSetzen();
   }
+
   window.addEventListener("popstate", function () { urlLesen(); zeichne(false); });
 
   /* ── Hover-Video ───────────────────────────────────────────────── */
@@ -676,7 +793,7 @@
   else start();
 
   window.klStock = {
-    version: "3.0.0",
+    version: "3.2.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,

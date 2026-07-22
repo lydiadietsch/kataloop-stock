@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 12 KB.
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.0.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.2.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.0.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.2.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -112,6 +112,10 @@ dieses Skript **danach**.
 | `?kategorie=…` von der Detailseite | wird beim Laden übernommen, inklusive Webflow-Checkbox-Optik |
 | unsaubere URLs | geschrieben werden nur `?kategorie=&typ=&lizenz=&ausrichtung=&tags=` (+ Seitenzahl); Zurück-Taste funktioniert |
 | Umlaute in der Suche | „Städte" findet „staedte" und umgekehrt |
+| Suche fand „Kaffee" bei „Affe" | Treffer nur noch am **Wortanfang oder Wortende**, nie mitten im Wort. An 500 echten Motiven: „affe" 22 → 8 Treffer, „eis" 343 → 63, jeweils ohne Fehltreffer |
+| „rote Blume" fand „rot, Blume" nicht | leichte Beugungs-Toleranz auf Grundformen (nur ganze Wörter): „blaues meer" 31 → 90 Treffer |
+| falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortanfang/-ende (2) vor Beugung (1) |
+| Blätter-Leiste sprang auf Seite 31 | gleitendes Fenster aus 5 Zahlen: `1 2 3 4 5 …`, bei Seite 5 dann `… 3 4 5 6 7 …` |
 | Aktiver Filter bleibt farblos | Die gelbe Optik hängt an `.stock-check-btn.fs-cmsfilter_active` — diese Klasse setzt das Skript jetzt selbst (zusätzlich `.kl-aktiv`), auch beim Laden aus der URL |
 | „Ich klicke und nichts passiert" | Ladebalken über der Liste + ausgegraute Karten **synchron beim Klick** (nach 9 ms gemessen), Treffer werden nach jeder Lade-Welle nachgezogen |
 
@@ -136,6 +140,10 @@ Beim Testen im Hintergrund-Tab laufen weder `requestAnimationFrame` noch
 ---
 
 ## Debug
+
+Suche: `sucheAbEnter: true` in der CFG schaltet das Tippen ab — dann filtert
+erst Enter. Standard ist Live-Suche ab 2 Zeichen, Enter wirkt sofort und
+schließt auf dem Handy die Tastatur.
 
 ```js
 window.__klStockDebug = true;   // vor dem Skript setzen
