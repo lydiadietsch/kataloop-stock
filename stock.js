@@ -1,11 +1,11 @@
 /*!
- * kataloop-stock.js v3.3.0
+ * kataloop-stock.js v3.4.0
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
  *                       + die drei eigenen Snippets (History-Blocker,
  *                         URL-Übernahme, Hover-Video)
- * Keine externe Abhängigkeit. Eine Datei, 16,6 KB (6,5 KB gzip).
+ * Keine externe Abhängigkeit. Eine Datei, 17,7 KB (6,8 KB gzip).
  *
  * WARUM EIGENER CODE STATT FINSWEET
  * Finsweet lädt für „Blättern + Filtern" beim Seitenaufruf ALLE CMS-Seiten
@@ -27,11 +27,41 @@
  *   fs-cmsload-element="loader"     →  data-kl-loader
  * Beide Schreibweisen funktionieren gleichzeitig.
  *
- * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.3.0/stock.min.js"></script>
+ * STATUS-ANZEIGEN (ab v3.4.0)
+ * Der Zustand der Liste wird am <html> gemeldet, damit sich Webflow-Elemente
+ * daran hängen können, ohne dass dieses Skript sie kennen muss:
+ *   data-kl-liste="laden" | "treffer" | "leer"
+ *   data-kl-ende            gesetzt, sobald die letzte Seite erreicht ist
+ * Eine Hülle in Webflow bekommt die Rolle und ist im Designer versteckt:
+ *   <div data-kl-zeigen="leer" class="… u-d-none">   → Kein Bild gefunden
+ *   <div data-kl-zeigen="ende" class="… u-d-none">   → Ende der Liste
+ * Das Skript schaltet nur die Klasse u-d-none um — Layout, Breakpoints und
+ * Sichtbarkeits-Grundzustand bleiben in Webflow. Texte darin werden befüllt:
+ *   data-kl-text="suche"    der Suchbegriff
+ *   data-kl-text="anzahl"   die Trefferzahl (nur wenn sie feststeht)
+ * Der Suchbegriff steht zusätzlich als data-kl-suche am <html> — Code-
+ * Komponenten im Shadow DOM lesen ihn von dort selbst.
  *
- * Ereignis für eigene Skripte (z. B. das Grid-Skript):
- *   window.addEventListener("kl:rendered", e => e.detail.items)
+ * Dieses Skript zeichnet KEINE Ladeanzeige mehr. Wer eine will, baut sie in
+ * Webflow und hängt sie an data-kl-zeigen="laden"; gemeldet wird der Zustand
+ * erst nach CFG.ladenAbMs, damit bei schnellen Filtern nichts aufblitzt.
+ *
+ * GEGENVORSCHLÄGE
+ * Findet die Suche nichts, schlägt das Skript Begriffe vor, die es im Katalog
+ * wirklich gibt (Wortanfang, Umlaut-Varianten, Tippfehler). Ausgegeben werden
+ * sie als Klone einer in Webflow gestalteten Vorlage:
+ *   <div data-kl-vorschlaege>
+ *     <a data-kl-vorschlag-vorlage class="…">Vorlage</a>
+ *     <a class="…">Feste Auswahl, falls nichts passt</a>
+ *   </div>
+ * Hat die Vorlage inneres Markup, bekommt [data-kl-vorschlag-text] den Text.
+ *
+ * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.4.0/stock.min.js"></script>
+ *
+ * Ereignisse:
+ *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
+ *   window.dispatchEvent(new CustomEvent("kl:neu-suchen"))        // alles zurücksetzen
  */
 (function () {
   "use strict";
@@ -49,7 +79,11 @@
     scrollExtra: 12,               // Abstand unter der Kopfleiste
     ladeGleichzeitig: 4,           // parallele Seiten-Abrufe
     aktivKlasse: "w--current",     // Klasse der aktiven Seitenzahl
-    videoVorladen: "600px"         // ab dieser Nähe Video-Metadaten holen
+    videoVorladen: "600px",        // ab dieser Nähe Video-Metadaten holen
+    verstecktKlasse: "u-d-none",   // Webflow-Klasse, mit der Status-Hüllen versteckt sind
+    seitenAnfangId: "nav-top",     // Scrollziel für „Neue Suche starten"
+    ladenAbMs: 250,                // so lange muss geladen werden, bis „laden" gemeldet wird
+    vorschlaegeMax: 4              // so viele Gegenvorschläge höchstens
   };
 
   var d = document;
@@ -217,23 +251,46 @@
      ein Balken direkt über der Liste und ein Ausgrauen der Karten. */
   var stil = d.createElement("style");
   stil.textContent =
-    ".kl-laedt{position:relative}" +
-    ".kl-laedt::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;z-index:5;" +
-      "background:linear-gradient(90deg,transparent,currentColor,transparent);background-size:40% 100%;" +
-      "background-repeat:no-repeat;animation:kl-lauf 1.1s linear infinite;opacity:.75}" +
-    "@keyframes kl-lauf{0%{background-position:-40% 0}100%{background-position:140% 0}}" +
-    ".kl-laedt .w-dyn-items{opacity:.45;transition:opacity .2s}" +
-    "[data-kl-filters].kl-warte,[fs-cmsfilter-element='filters'].kl-warte{cursor:progress}" +
-    "@media (prefers-reduced-motion: reduce){.kl-laedt::before{animation:none;background:currentColor;opacity:.4}}" +
+    /* Dieses Skript zeichnet KEINE Ladeanzeige mehr (Nutzerin-Vorgabe): weder
+       den laufenden Balken noch das Abdunkeln der Karten. Wer eine will, baut
+       sie in Webflow und hängt sie an data-kl-zeigen="laden" — dann bestimmt
+       das Design sie. Die Klasse .kl-laedt und aria-busy bleiben am
+       Listen-Wrapper, damit man sich anhängen kann. */
     ".kl-suchhinweis{position:absolute;transform:translateY(-50%);pointer-events:none;" +
       "font-size:.72em;letter-spacing:.02em;opacity:.45;transition:opacity .15s;white-space:nowrap}";
   d.head.appendChild(stil);
 
+  /* Die alte Webflow-Ladeanzeige wird EINMAL versteckt und nie wieder
+     angefasst — sonst stünde sie ab jetzt dauerhaft im Bild. Sie kann im
+     Designer gelöscht werden; das Skript braucht sie nicht mehr. */
+  if (loader) loader.style.display = "none";
+
+  var laedt = false;                 // lädt gerade etwas? (innen)
+  var ladenGemeldet = false;         // schon lange genug, um es zu zeigen? (außen)
+  var ladeTimer = 0;
+
+  /* Getrennt, weil beides Verschiedenes leistet: `laedt` verhindert sofort,
+     dass der Leerhinweis aufblitzt, solange noch geladen wird. Nach außen
+     gemeldet wird „laden" dagegen erst nach CFG.ladenAbMs — eine Anzeige, die
+     für 80 ms aufpoppt, sieht genauso billig aus wie der alte Balken. */
   function ladeAnzeige(an) {
-    if (loader) { loader.style.display = an ? "" : "none"; loader.style.opacity = an ? "1" : "0"; }
+    laedt = an;
+    if (an) {
+      if (!ladeTimer && !ladenGemeldet) {
+        ladeTimer = setTimeout(function () {
+          ladeTimer = 0;
+          ladenGemeldet = true;
+          statusAktualisieren();
+        }, CFG.ladenAbMs);
+      }
+    } else {
+      if (ladeTimer) { clearTimeout(ladeTimer); ladeTimer = 0; }
+      ladenGemeldet = false;
+    }
     listWrap.classList.toggle("kl-laedt", an);
     if (filterForm) filterForm.classList.toggle("kl-warte", an);
     listWrap.setAttribute("aria-busy", an ? "true" : "false");
+    statusAktualisieren();
   }
 
   var hatWeiter = {};         // Seitenzahl → gibt es eine Folgeseite?
@@ -449,10 +506,247 @@
     return liste;
   }
 
+  /* Einen Begriff anwenden — von der Tastatur wie von einem Vorschlags-Chip.
+     `insFeld` nur bei den Chips: beim Tippen würde das Zurückschreiben den
+     Cursor bewegen. */
+  function begriffSuchen(wort, insFeld) {
+    if (insFeld && suchFeld) suchFeld.value = wort;
+    if (wort === angewandteSuche) return;
+    angewandteSuche = wort;
+    seite = 1;
+    urlSchreiben();
+    zeichne(false);
+  }
+
+  /* ── Gegenvorschläge ───────────────────────────────────────────
+     Findet die Suche nichts, ist die beste Antwort ein Begriff, den es im
+     Katalog WIRKLICH gibt. Dafür einmal ein Wortverzeichnis aus allen
+     geladenen Motiven bauen (Tags, Titel, Orte, Kamera …) und darin die
+     nächstliegenden Wörter suchen.
+
+     Gebaut wird es erst, wenn es gebraucht wird — also frühestens bei der
+     ersten erfolglosen Suche. Und dann ist der Katalog garantiert
+     vollständig, denn der Leerzustand erscheint überhaupt erst, wenn die
+     Ladephase durch ist.
+
+     Angenehmer Nebeneffekt: jeder Vorschlag stammt aus einem echten Motiv,
+     kann also nie ins Leere führen. */
+  var wortIndex = null;
+  var NUR_BUCHSTABEN = /^[a-z]+$/;   // norm() hat Umlaute schon zu ae/oe/ue gemacht
+
+  function wortIndexBauen() {
+    var t0 = Date.now();
+    var zaehl = Object.create(null);
+    for (var n in seiten) {
+      if (!seiten.hasOwnProperty(n)) continue;
+      for (var i = 0; i < seiten[n].length; i++) {
+        var worte = seiten[n][i].such.split(" ");
+        for (var j = 0; j < worte.length; j++) {
+          var t = worte[j];
+          /* Nur echte Wörter: mindestens vier Buchstaben, keine Ziffern.
+             Sonst landen Kataloop-IDs, Kameramodelle und die Pixelwörter
+             („50mp", „8k") im Verzeichnis — als Vorschlag hilft das niemandem,
+             und es bläht die Suche unnötig auf. Gesucht werden kann danach
+             weiterhin, das hier betrifft nur die Vorschläge. */
+          if (t.length < 4 || !NUR_BUCHSTABEN.test(t)) continue;
+          zaehl[t] = (zaehl[t] || 0) + 1;
+        }
+      }
+    }
+    var liste = [];
+    for (var wort in zaehl) liste.push([wort, zaehl[wort]]);
+    log("Wortverzeichnis:", liste.length, "Wörter in", Date.now() - t0, "ms");
+    return liste;
+  }
+
+  /* Levenshtein mit Deckel: sobald feststeht, dass der Abstand über `max`
+     liegt, wird abgebrochen. Ohne den Deckel kostet der Vergleich gegen
+     tausende Wörter spürbar Zeit. */
+  function abstand(a, b, max) {
+    var la = a.length, lb = b.length;
+    if (Math.abs(la - lb) > max) return max + 1;
+    var vorher = [], jetzt = [], i, j;
+    for (j = 0; j <= lb; j++) vorher[j] = j;
+    for (i = 1; i <= la; i++) {
+      jetzt[0] = i;
+      var best = i;
+      for (j = 1; j <= lb; j++) {
+        var kosten = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
+        jetzt[j] = Math.min(jetzt[j - 1] + 1, vorher[j] + 1, vorher[j - 1] + kosten);
+        if (jetzt[j] < best) best = jetzt[j];
+      }
+      if (best > max) return max + 1;
+      var tausch = vorher; vorher = jetzt; jetzt = tausch;
+    }
+    return vorher[lb];
+  }
+
+  function vorschlaegeFinden() {
+    var tSuche = Date.now();
+    var gesucht = suchBegriffe().filter(function (b) { return b.length >= 3; });
+    if (!gesucht.length) return [];
+    if (!wortIndex) wortIndex = wortIndexBauen();
+    if (!wortIndex.length) return [];
+
+    var gefunden = Object.create(null);
+    gesucht.forEach(function (b) {
+      /* Kurze Wörter vertragen nur einen Tippfehler — bei zweien wäre „hund"
+         plötzlich „mund", „rund", „bund". */
+      var maxAbstand = b.length <= 5 ? 1 : 2;
+      var fb = flach(b);
+      for (var i = 0; i < wortIndex.length; i++) {
+        var wort = wortIndex[i][0], haeufig = wortIndex[i][1], rang = 0;
+        if (wort === b) continue;
+        if (wort.indexOf(b) === 0 || b.indexOf(wort) === 0) rang = 3;
+        else if (flach(wort).indexOf(fb) === 0) rang = 2;
+        else if (abstand(b, wort, maxAbstand) <= maxAbstand) rang = 1;
+        if (!rang) continue;
+        var alt = gefunden[wort];
+        if (!alt || rang > alt.rang) gefunden[wort] = { wort: wort, rang: rang, haeufig: haeufig };
+      }
+    });
+
+    var liste = [];
+    for (var w in gefunden) liste.push(gefunden[w]);
+    liste.sort(function (a, b) {
+      return b.rang - a.rang || b.haeufig - a.haeufig || a.wort.length - b.wort.length;
+    });
+    log("Vorschlagssuche:", Date.now() - tSuche, "ms für", wortIndex.length, "Wörter");
+    return liste.slice(0, CFG.vorschlaegeMax).map(function (e) { return e.wort; });
+  }
+
+  /* Ausgabe nach dem Muster der Blätter-Leiste: die Nutzerin gestaltet EINEN
+     Chip in Webflow, das Skript nimmt ihn als Vorlage aus dem DOM und klont
+     ihn. So bleiben es echte Webflow-Elemente mit ihren Klassen und ihrem
+     Hover — das Skript setzt nur Text und Klick.
+
+       <div data-kl-vorschlaege>
+         <a data-kl-vorschlag-vorlage class="…">Vorlage</a>
+         <a class="…">Feste Auswahl, falls nichts passt</a>
+       </div>                                                              */
+  var vorschlagBox = null, vorschlagVorlage = null;
+
+  /* Erst bei DOMContentLoaded suchen, nicht schon beim Ausführen des Skripts:
+     der Container darf irgendwo auf der Seite stehen, auch hinter dem
+     Skript-Tag. Trotzdem früh genug — die Vorlage muss aus dem DOM sein,
+     bevor der erste Leerzustand sie als überzähligen Chip zeigen könnte. */
+  function vorschlaegeVorbereiten() {
+    vorschlagBox = qs("[data-kl-vorschlaege]");
+    vorschlagVorlage = vorschlagBox ? qs("[data-kl-vorschlag-vorlage]", vorschlagBox) : null;
+    if (vorschlagVorlage) {
+      vorschlagVorlage.removeAttribute("data-kl-vorschlag-vorlage");
+      if (vorschlagVorlage.parentNode) vorschlagVorlage.parentNode.removeChild(vorschlagVorlage);
+    }
+  }
+
+  function vorschlaegeBauen() {
+    if (!vorschlagBox) return;
+    qsa("[data-kl-vorschlag]", vorschlagBox).forEach(function (e) { e.remove(); });
+
+    var worte = vorschlagVorlage ? vorschlaegeFinden() : [];
+    worte.forEach(function (wort) {
+      var chip = vorschlagVorlage.cloneNode(true);
+      chip.setAttribute("data-kl-vorschlag", "");
+      /* Hat die Vorlage inneres Markup (Icon, Span), wird nur der markierte
+         Textträger befüllt — sonst der Chip selbst. */
+      var ziel = qs("[data-kl-vorschlag-text]", chip) || chip;
+      ziel.textContent = wort;
+      chip.addEventListener("click", function (e) {
+        e.preventDefault();
+        begriffSuchen(wort, true);
+      });
+      vorschlagBox.appendChild(chip);
+    });
+
+    /* Echte Treffer verdrängen die feste Auswahl; gibt es keine, bleibt sie
+       stehen. Das ist der Hybrid: „Meintest du …?" wenn möglich, sonst die
+       gepflegten Chips. */
+    Array.prototype.forEach.call(vorschlagBox.children, function (kind) {
+      if (kind.hasAttribute("data-kl-vorschlag")) return;
+      kind.classList.toggle(CFG.verstecktKlasse, worte.length > 0);
+    });
+    log("Vorschläge:", worte.length ? worte.join(", ") : "keine (feste Auswahl)");
+  }
+
+  /* ── Zustand nach außen melden ─────────────────────────────────
+     Ein Attribut am <html>, an das sich Webflow-Elemente hängen können,
+     ohne dass dieses Skript ihre Namen kennen muss:
+
+       data-kl-liste = "laden" | "treffer" | "leer"
+       data-kl-ende  = gesetzt, sobald die letzte Seite erreicht ist
+
+     Hüllen mit data-kl-zeigen="leer|treffer|ende" bekommen die Webflow-
+     Klasse aus CFG.verstecktKlasse an- bzw. abgeschaltet. Absichtlich
+     kein style.display: so behält Webflow die Hoheit über das Layout
+     (flex/grid/Breakpoints), und weil „versteckt" der ausgelieferte
+     Zustand ist, blitzt beim Seitenaufbau nichts auf, bevor dieses
+     Skript läuft. Ohne Skript bleibt alles verborgen — richtig herum.
+
+     Texte mit data-kl-text="suche" bekommen den Suchbegriff,
+     data-kl-text="anzahl" die Trefferzahl — Letztere nur, wenn sie
+     wirklich feststeht (Katalog vollständig geladen), sonst stünde dort
+     zwischendurch eine zu kleine Zahl. */
+  var laufendeAnzahl = null;      // gerendert auf dieser Seite
+  var laufendeGesamt = null;      // Treffer insgesamt, null = noch unbekannt
+  var laufendeSeiten = 1;
+
+  var vorschlagFuer = null;         // für welchen Begriff stehen die Chips gerade?
+
+  function statusAktualisieren() {
+    var w = d.documentElement;
+
+    /* Der Begriff hängt nicht am Ladezustand und wird immer gepflegt. Er steht
+       zusätzlich am <html>, weil Code-Komponenten im Shadow DOM liegen und von
+       hier aus nicht befüllt werden können — ein Attribut lesen sie selbst. */
+    var begriff = angewandteSuche || (suchFeld ? suchFeld.value.trim() : "");
+    if (begriff) w.setAttribute("data-kl-suche", begriff);
+    else w.removeAttribute("data-kl-suche");
+    qsa('[data-kl-text="suche"]').forEach(function (el) { el.textContent = begriff; });
+    if (laufendeGesamt !== null)
+      qsa('[data-kl-text="anzahl"]').forEach(function (el) { el.textContent = String(laufendeGesamt); });
+
+    /* Der Leerhinweis richtet sich nach `laedt` DIREKT, nicht nach dem nach
+       außen gemeldeten Zustand: solange geladen wird, darf er nie erscheinen
+       (das war der Blitzer). */
+    zeigeLeer(!laedt && laufendeAnzahl === 0);
+
+    /* Wird gerade geladen, es aber noch nicht lange genug, um es zu zeigen,
+       bleibt der zuletzt gemeldete Zustand einfach stehen — so flackert bei
+       schnellen Filtern nichts auf. */
+    if (laedt && !ladenGemeldet) return;
+
+    var zustand = laedt ? "laden" : laufendeAnzahl === 0 ? "leer" : "treffer";
+    /* Solange noch nichts gezählt wurde, wird auch nichts behauptet: sonst
+       stünde beim allerersten Aufruf seite (1) >= laufendeSeiten (1) da und
+       „Ende der Liste" erschiene auf Seite 1 von 31.
+       Ungefiltert zählt immer die LEBENDE Seitenzahl: fehlt w-page-count,
+       wächst gesamtSeiten erst während der Sprungsuche auf den echten Wert. */
+    var seitenJetzt = istGefiltert() ? laufendeSeiten : Math.max(gesamtSeiten, 1);
+    var ende = zustand === "treffer" && laufendeAnzahl !== null && seite >= seitenJetzt;
+
+    w.setAttribute("data-kl-liste", zustand);
+    if (ende) w.setAttribute("data-kl-ende", "");
+    else w.removeAttribute("data-kl-ende");
+
+    qsa("[data-kl-zeigen]").forEach(function (el) {
+      var rolle = el.getAttribute("data-kl-zeigen");
+      var an = rolle === "ende" ? ende : rolle === zustand;
+      el.classList.toggle(CFG.verstecktKlasse, !an);
+    });
+
+    /* Gegenvorschläge nur neu bauen, wenn sich der Begriff geändert hat —
+       statusAktualisieren() läuft bei jedem Rendern. */
+    if (zustand === "leer") {
+      if (begriff !== vorschlagFuer) { vorschlagFuer = begriff; vorschlaegeBauen(); }
+    } else vorschlagFuer = null;
+  }
+
   /* ── Rendern ───────────────────────────────────────────────────── */
   var leerHinweis = null;
   function zeigeLeer(an, text) {
-    if (an && !leerHinweis) {
+    /* Bringt die Seite eine eigene Leer-Hülle mit (Webflow-Komponente),
+       baut dieses Skript keinen zweiten Hinweis daneben. */
+    if (an && !leerHinweis && !qs('[data-kl-zeigen="leer"]')) {
       leerHinweis = d.createElement("div");
       leerHinweis.className = "w-dyn-empty kl-empty";
       leerHinweis.setAttribute("role", "status");
@@ -463,17 +757,30 @@
     itemsBox.style.display = an ? "none" : "";
   }
 
-  function render(liste, seitenZahl) {
+  function render(liste, seitenZahl, gesamt) {
     var frag = d.createDocumentFragment();
     liste.forEach(function (it) { frag.appendChild(it.el); });
     itemsBox.textContent = "";
     itemsBox.appendChild(frag);
-    zeigeLeer(liste.length === 0);
+    laufendeAnzahl = liste.length;
+    laufendeGesamt = gesamt === undefined ? null : gesamt;
+    laufendeSeiten = seitenZahl;
+    statusAktualisieren();
     paginationBauen(seitenZahl);
     videosBinden(itemsBox);
     /* KEIN ix2.init() hier: das setzt sämtliche Interaktions-Zustände der Seite
        zurück (unter anderem den aktiven Filter-Chip) und kostet spürbar Zeit. */
     window.dispatchEvent(new CustomEvent("kl:rendered", { detail: { items: liste.map(function (i) { return i.el; }) } }));
+  }
+
+  /* Ungefiltert steht die Gesamtzahl erst fest, wenn alle Seiten da sind —
+     die letzte Seite ist meist nur teilweise gefüllt, hochrechnen wäre
+     geraten. Vorher: null (die Anzeige bleibt dann einfach stehen). */
+  function ungefiltertGesamt() {
+    if (!alleGeladen) return null;
+    var n = 0;
+    for (var k in seiten) if (seiten.hasOwnProperty(k)) n += seiten[k].length;
+    return n;
   }
 
   function zeichne(scrollen) {
@@ -483,7 +790,7 @@
       ladeAnzeige(!seiten[seite]);
       seiteHolen(seite).then(function (items) {
         ladeAnzeige(false);
-        render(items, Math.max(gesamtSeiten, 1));
+        render(items, Math.max(gesamtSeiten, 1), ungefiltertGesamt());
         if (scrollen) nachObenScrollen();
       });
       return;
@@ -492,7 +799,10 @@
       var t = treffer();
       var seitenZahl = Math.max(1, Math.ceil(t.length / proSeite));
       if (seite > seitenZahl) seite = 1;
-      render(t.slice((seite - 1) * proSeite, seite * proSeite), seitenZahl);
+      /* Die Trefferzahl stimmt erst, wenn der Katalog vollständig ist —
+         vorher wäre sie nur der bisher geladene Ausschnitt. */
+      render(t.slice((seite - 1) * proSeite, seite * proSeite), seitenZahl,
+             alleGeladen ? t.length : null);
     };
     if (alleGeladen) {                     // alles da → sofort und ohne Balken
       ladeAnzeige(false);
@@ -658,6 +968,40 @@
     if (neu !== location.pathname + location.search + location.hash) history.pushState({ kl: 1 }, "", neu);
   }
 
+  /* ── Neue Suche starten ────────────────────────────────────────
+     Alles zurück auf Anfang: Haken raus, Suchfeld leer, saubere URL,
+     Seite 1 — ohne Neuladen. Ausgelöst per Event, damit die Webflow-
+     Komponente nichts über den Aufbau dieses Skripts wissen muss:
+
+       window.dispatchEvent(new CustomEvent("kl:neu-suchen"))
+
+     Gescrollt wird zum Seitenanfang (CFG.seitenAnfangId), NICHT zur
+     Liste — anders als beim Blättern soll man oben wieder anfangen. */
+  function zumSeitenanfang() {
+    var ziel = d.getElementById(CFG.seitenAnfangId);
+    var y = ziel ? ziel.getBoundingClientRect().top + window.pageYOffset : 0;
+    var weich = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    window.scrollTo({ top: Math.max(0, y), behavior: weich ? "smooth" : "auto" });
+  }
+
+  function neueSuche() {
+    sperre = true;                                   // kein URL-Schreiben je Haken
+    CFG.urlFelder.forEach(function (feld) {
+      steuerungen(feld).forEach(function (s) { setzeBox(s, false); });
+    });
+    if (suchFeld) suchFeld.value = "";
+    angewandteSuche = "";
+    seite = 1;
+    sperre = false;
+    optikSync();
+    urlSchreiben();
+    zeichne(false);                                  // scrollt selbst nicht
+    zumSeitenanfang();
+    log("neue Suche");
+  }
+
+  window.addEventListener("kl:neu-suchen", function () { neueSuche(); });
+
   var tippTimer = null;
   if (filterForm) {
     filterForm.addEventListener("change", function (e) {
@@ -698,9 +1042,7 @@
       /* Zu kurz zählt wie leer — sonst zeigt die Liste noch Treffer zu
          „hund", während im Feld nur „h" steht. */
       if (wert.length < CFG.sucheMinZeichen) wert = "";
-      if (wert === angewandteSuche) return;
-      angewandteSuche = wert;
-      seite = 1; urlSchreiben(); zeichne(false);
+      begriffSuchen(wert, false);
       hinweisSetzen();
     };
 
@@ -811,13 +1153,23 @@
 
   /* ── Start ─────────────────────────────────────────────────────── */
   function start() {
+    vorschlaegeVorbereiten();          // muss VOR dem ersten Rendern laufen
     ladeAnzeige(false);
     urlLesen();
     videosBinden(d);
     /* Nur neu rendern, wenn die URL etwas verlangt — sonst bleibt das
        server-gerenderte Seite-1-Markup unangetastet stehen (schnellster Start). */
     if (istGefiltert() || seite !== 1) zeichne(false);
-    else paginationBauen(gesamtSeiten);
+    else {
+      /* Seite 1 kommt fertig vom Server, render() läuft hier absichtlich NICHT.
+         Dann muss der Zustand von Hand auf den ausgelieferten Stand gesetzt
+         werden — sonst meldet die Statusanzeige Werte, die nie gezählt wurden. */
+      laufendeAnzahl = seiten[1].length;
+      laufendeSeiten = Math.max(gesamtSeiten, 1);
+      laufendeGesamt = ungefiltertGesamt();
+      statusAktualisieren();
+      paginationBauen(gesamtSeiten);
+    }
     /* Katalog im HINTERGRUND vorladen, sobald die Seite fertig ist.
        Der erste Bildaufbau bleibt unangetastet (nichts davor), aber wer nach
        ein paar Sekunden filtert, bekommt das Ergebnis sofort — das ist der
@@ -836,18 +1188,21 @@
   else start();
 
   window.klStock = {
-    version: "3.2.0",
+    version: "3.4.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
         alleGeladen: alleGeladen, geladeneSeiten: Object.keys(seiten).length,
         gefiltert: istGefiltert(), treffer: istGefiltert() && alleGeladen ? treffer().length : null,
+        status: d.documentElement.getAttribute("data-kl-liste"),
+        ende: d.documentElement.hasAttribute("data-kl-ende"),
         karten: qsa(".u-link-cover").length,
         gebunden: qsa(".u-link-cover[data-kl-hover]").length
       };
     },
     geheZuSeite: geheZuSeite,
     zeichne: zeichne,
-    alleHolen: alleHolen
+    alleHolen: alleHolen,
+    neueSuche: neueSuche
   };
 })();

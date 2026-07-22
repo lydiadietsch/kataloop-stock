@@ -1,13 +1,13 @@
 # Kataloop Stock — eigene Filter-, Blätter- und Video-Logik
 
 Ein Skript für alle Seiten mit der Stock-Collection. **Keine Fremdbibliothek**,
-keine Finsweet-Skripte mehr. Eine Datei, 12 KB.
+keine Finsweet-Skripte mehr. Eine Datei, 17,7 KB (6,8 KB gzip).
 
 - `stock.js` — Quelldatei (bearbeiten)
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.3.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.4.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.3.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.4.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -71,6 +71,98 @@ umbenennen willst — beide Schreibweisen funktionieren gleichzeitig:
 | `fs-cmsload-element="page-button"` | `data-kl-page-button` |
 | `fs-cmsload-element="page-dots"` | `data-kl-page-dots` |
 | `fs-cmsload-element="loader"` | `data-kl-loader` |
+
+---
+
+## Statusanzeigen (ab v3.4.0)
+
+Für die Webflow-Komponenten „Kein Bild gefunden" und „Ende der Liste". Das
+Skript kennt ihre Namen nicht — es meldet nur seinen Zustand, den Rest macht
+Webflow.
+
+**Am `<html>`:**
+
+| Attribut | Werte |
+|---|---|
+| `data-kl-liste` | `laden` · `treffer` · `leer` |
+| `data-kl-ende` | gesetzt, sobald die letzte Seite erreicht ist |
+
+`laden` wird **erst nach 250 ms** gemeldet (`CFG.ladenAbMs`). Eine Anzeige, die
+für 80 ms aufpoppt, sieht genauso billig aus wie ein Ladebalken — und bei
+geladenem Katalog filtert die Liste ohnehin ohne jeden Abruf.
+
+**Im Designer** kommt um jede Komponente eine Hülle mit ihrer Rolle, versteckt
+über die vorhandene Klasse `u-d-none`:
+
+```html
+<div data-kl-zeigen="leer" class="… u-d-none">   <!-- Kein Bild gefunden -->
+<div data-kl-zeigen="ende" class="… u-d-none">   <!-- Ende der Liste -->
+```
+
+Das Skript schaltet **nur diese eine Klasse** um. Absichtlich kein
+`style.display`: so bleibt das Layout (flex/grid, Breakpoints) in Webflow, und
+weil „versteckt" der ausgelieferte Zustand ist, kann beim Seitenaufbau nichts
+aufblitzen, bevor das Skript läuft. Ohne JavaScript bleibt alles verborgen —
+richtig herum.
+
+**Texte darin** werden befüllt, egal wo sie stehen:
+
+| Attribut | Inhalt |
+|---|---|
+| `data-kl-text="suche"` | der Suchbegriff |
+| `data-kl-text="anzahl"` | die Trefferzahl — **nur wenn sie feststeht** |
+
+Die Trefferzahl bleibt leer, solange der Katalog lädt: ein Zwischenstand wäre
+schlicht falsch. Ungefiltert steht sie erst, wenn alle Seiten da sind (die
+letzte Seite ist meist nur teilweise gefüllt, hochrechnen wäre geraten).
+
+**Zurücksetzen** — der Button „Neue Suche starten" feuert nur ein Ereignis:
+
+```js
+window.dispatchEvent(new CustomEvent("kl:neu-suchen"))
+```
+
+Das Skript nimmt alle Haken raus, leert das Suchfeld, schreibt eine saubere
+URL, rendert Seite 1 und scrollt zu `#nav-top` — ohne Neuladen. Auch direkt
+aufrufbar: `window.klStock.neueSuche()`.
+
+---
+
+## Gegenvorschläge („Meintest du …?")
+
+Findet die Suche nichts, schlägt das Skript Begriffe vor, **die es im Katalog
+wirklich gibt** — ein Vorschlag kann also nie ins Leere führen.
+
+Gefunden wird über ein Wortverzeichnis aus allen geladenen Motiven (Tags,
+Titel, Orte, Kamera). Gesucht wird in dieser Rangfolge: Wortanfang, dann die
+Umlaut-Variante, dann Tippfehler nach Levenshtein — bei Wörtern bis fünf
+Zeichen ein Fehler, darüber zwei (bei kurzen Wörtern wäre „hund" sonst
+plötzlich „mund", „rund", „bund"). Bei Gleichstand gewinnt das häufigere Wort.
+
+**Kosten** (gemessen an 3.100 Motiven): Verzeichnis **24.902 Wörter in 40 ms**,
+einmalig und erst bei der ersten erfolglosen Suche gebaut — danach **7–8 ms**
+je Suche. Wer nie danebentippt, zahlt nichts.
+
+**Ausgabe** nach demselben Muster wie die Blätter-Leiste: du gestaltest **einen**
+Chip in Webflow, das Skript nimmt ihn als Vorlage aus dem DOM und klont ihn.
+
+```html
+<div data-kl-vorschlaege>
+  <a data-kl-vorschlag-vorlage class="stock-check-btn …">Vorlage</a>
+  <a class="stock-check-btn …">Natur</a>      <!-- feste Auswahl -->
+  <a class="stock-check-btn …">Tiere</a>      <!-- falls nichts passt -->
+</div>
+```
+
+Deine Klassen, dein Hover — die Klone sind echte Webflow-Elemente, das Skript
+setzt nur Text und Klick. Hat die Vorlage inneres Markup (Icon, Span), bekommt
+`[data-kl-vorschlag-text]` den Text, sonst der Chip selbst.
+
+Alles außer der Vorlage ist die **feste Auswahl**: Gibt es echte Vorschläge,
+treten sie an ihre Stelle; gibt es keine, bleibt sie stehen. Den Container am
+besten **in** die Leer-Hülle legen, dann verschwindet er mit ihr.
+
+Zahl der Vorschläge: `CFG.vorschlaegeMax` (4).
 
 ---
 
@@ -121,6 +213,9 @@ dieses Skript **danach**.
 | Blätter-Leiste sprang auf Seite 31 | gleitendes Fenster aus 5 Zahlen: `1 2 3 4 5 …`, bei Seite 5 dann `… 3 4 5 6 7 …` |
 | Aktiver Filter bleibt farblos | Die gelbe Optik hängt an `.stock-check-btn.fs-cmsfilter_active` — diese Klasse setzt das Skript jetzt selbst (zusätzlich `.kl-aktiv`), auch beim Laden aus der URL |
 | „Ich klicke und nichts passiert" | Ladebalken über der Liste + ausgegraute Karten **synchron beim Klick** (nach 9 ms gemessen), Treffer werden nach jeder Lade-Welle nachgezogen |
+| Ladebalken über der Liste sah billig aus | Ersatzlos raus — samt Abdunkeln der Karten und der alten Webflow-Ladeanzeige (die wird einmal versteckt und nicht mehr angefasst; sie kann im Designer gelöscht werden). Eine Ladeanzeige gestaltest du jetzt selbst und hängst sie an `data-kl-zeigen="laden"` |
+| Leerhinweis blitzte während der Suche auf | `zeichne()` zeigt erst das bereits Geladene — bei einem Begriff, der auf Seite 1 fehlt, sind das 0 Treffer, und der Leerhinweis erschien, obwohl noch geladen wurde. Er kommt jetzt erst, wenn die Ladephase durch ist. Gemessen an einer Kopie der Staging-Seite mit gebremster Leitung: vorher **2.311 ms sichtbar (137 Bilder)**, danach **kein einziges Bild** |
+| „Ende der Liste" stand auf Seite 1 | Beim normalen Seitenaufruf rendert das Skript bewusst nicht neu (Seite 1 kommt fertig vom Server) — die Zähler blieben auf ihren Startwerten und `seite 1 >= 1` ergab „Ende". Der Zustand wird jetzt aus dem ausgelieferten Markup gesetzt, und solange nichts gezählt wurde, wird auch nichts behauptet |
 
 ---
 
