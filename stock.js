@@ -28,7 +28,7 @@
  * Beide Schreibweisen funktionieren gleichzeitig.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.1/stock.min.js"></script>
  *
  * Ereignis für eigene Skripte (z. B. das Grid-Skript):
  *   window.addEventListener("kl:rendered", e => e.detail.items)
