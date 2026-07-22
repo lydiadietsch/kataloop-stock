@@ -62,6 +62,12 @@
   var dotsTmpl = qs('[fs-cmsload-element="page-dots"], [data-kl-page-dots]');
   var btnTmpl = qs('[fs-cmsload-element="page-button"], [data-kl-page-button]');
   var zahlenBox = btnTmpl ? btnTmpl.parentElement : null;
+  /* Vorlagen aus dem DOM NEHMEN (nicht nur ausblenden): sonst findet ein
+     fremdes Snippet wie hideLastIfDotsBefore() sie noch, zählt sie als echte
+     Blätter-Buttons und blendet sie wieder ein. Als Speicher-Vorlage
+     funktionieren sie genauso. */
+  if (btnTmpl && btnTmpl.parentNode) btnTmpl.parentNode.removeChild(btnTmpl);
+  if (dotsTmpl && dotsTmpl.parentNode) dotsTmpl.parentNode.removeChild(dotsTmpl);
   var weiterBtn = qs(".w-pagination-next");
   var zurueckBtn = qs(".w-pagination-previous");
 
@@ -386,8 +392,6 @@
       zahlenBox.appendChild(b);
       vorher = n;
     });
-    btnTmpl.style.display = "none";
-    if (dotsTmpl) dotsTmpl.style.display = "none";
     if (weiterBtn) {
       weiterBtn.style.display = seite < gesamt ? "" : "none";
       weiterBtn.setAttribute("href", "?" + pagParam + "=" + Math.min(seite + 1, gesamt));

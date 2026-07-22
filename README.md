@@ -21,15 +21,23 @@ Ein Push auf `main` allein ändert live nichts.
 
 ## Was in Webflow zu tun ist
 
-**Auf `/stockfotos-videos`, vor `</body>`, diese Blöcke ersatzlos löschen:**
+**In den Seiten-Einstellungen von `/stockfotos-videos` (vor `</body>`) diese
+sechs Blöcke ersatzlos löschen:**
 
 1. `@finsweet/attributes@2/attributes.js` (das `fs-list`-Skript)
-2. `@finsweet/attributes-cmsfilter@1/cmsfilter.js`
-3. `@finsweet/attributes-cmsload@1/cmsload.js`
-4. Den `history.replaceState`-Blocker („Verhindert nur beim ersten Laden …")
+2. Den `history.replaceState`-Blocker („Verhindert nur beim ersten Laden …")
+3. `@finsweet/attributes-cmsfilter@1/cmsfilter.js`
+4. `@finsweet/attributes-cmsload@1/cmsload.js`
 5. Das „Filterwerte aus der URL übernehmen"-Snippet
 6. Das Hover-Video-Snippet
-7. `hideLastIfDotsBefore()` — die Auslassungspunkte macht das Skript selbst
+
+**Dazu ein siebter Block, der NICHT in den Seiten-Einstellungen steht:** das
+Embed `hideLastIfDotsBefore()` liegt im Canvas **innerhalb der Blätter-Leiste**
+(`.page-numbers-wrapper` → unsichtbares Embed `u-d-none w-embed`). Die
+Auslassungspunkte setzt das Skript selbst; das Embed kann weg. Es richtet
+keinen Schaden an, wenn es bleibt (die Vorlagen werden aus dem DOM genommen,
+sein Selektor findet nichts mehr — so getestet), es läuft dann nur unnötig bei
+jeder DOM-Änderung mit.
 
 Übrig bleibt **eine** Zeile:
 
@@ -37,8 +45,11 @@ Ein Push auf `main` allein ändert live nichts.
 <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.0/stock.min.js"></script>
 ```
 
-**Bleiben darf und soll:** das Grid-Skript (`setGrid`/`cc-stock-tmb`), Cookie-Consent,
-Cart-Skript, GA. Das Grid-Skript hängt an einem eigenen MutationObserver und
+**Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
+`.stock-collection-wrapper::after`-Style), Cookie-Consent, Cart-Skript, GA.
+**Und im Canvas:** die Ladeanzeige (`fs-cmsload-element="loader"`) — die benutzt
+dieses Skript als Ladeanzeige — sowie die Vorlagen für Seitenzahl und
+Auslassungspunkte (`page-button`, `page-dots`) und die Weiter-/Zurück-Buttons. Das Grid-Skript hängt an einem eigenen MutationObserver und
 bekommt neue Karten automatisch mit; zusätzlich feuert dieses Skript
 `window.dispatchEvent(new CustomEvent("kl:rendered", { detail: { items } }))`.
 

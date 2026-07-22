@@ -1,0 +1,110 @@
+<!-- Finsweet Attributes -->
+<script async type="module"
+src="https://cdn.jsdelivr.net/npm/@finsweet/attributes@2/attributes.js"
+fs-list></script>
+
+<script>
+// Verhindert nur beim ersten Laden, dass Finsweet die URL verändert
+(function(){
+  let firstLoad = true;
+  const originalReplace = history.replaceState.bind(history);
+  const originalPush = history.pushState.bind(history);
+
+  history.replaceState = function(state, title, url){
+    if (firstLoad) return; // erste Aufrufe ignorieren
+    return originalReplace(state, title, url);
+  };
+  history.pushState = function(state, title, url){
+    if (firstLoad) return;
+    return originalPush(state, title, url);
+  };
+
+  window.addEventListener('load', () => {
+    // nach dem ersten Render darf alles wieder normal funktionieren
+    setTimeout(() => { firstLoad = false; }, 800);
+  });
+})();
+</script>
+
+
+<!-- Finsweet -->
+<script src="https://cdn.jsdelivr.net/npm/@finsweet/attributes-cmsfilter@1/cmsfilter.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@finsweet/attributes-cmsload@1/cmsload.js"></script>
+
+
+<!-- Übernimmt Filterwerte aus der URL und wendet sie beim Laden einmalig an -->
+<script>
+(function () {
+  let appliedOnce = false;
+
+  function ev(el, type){ try{ el.dispatchEvent(new Event(type,{bubbles:true})) }catch(e){} }
+  function setVal(el, val){
+    if (!el) return false;
+    if (el.value !== val){ el.value = val; ev(el,'input'); ev(el,'change'); return true; }
+    return false;
+  }
+  function setChoice(nodeList, wanted){
+    if (!nodeList || !nodeList.length) return false;
+    const v = String(wanted).trim().toLowerCase();
+    let changed = false;
+    nodeList.forEach(el=>{
+      const label = (el.nextElementSibling && el.nextElementSibling.textContent || '').trim().toLowerCase();
+      const cand  = (el.value || label).trim().toLowerCase();
+      const should = cand === v;
+      if (el.type === 'checkbox' || el.type === 'radio'){
+        if (el.checked !== should){ el.checked = should; ev(el,'input'); ev(el,'change'); changed = true; }
+      } else if (el.tagName === 'SELECT'){
+        if (el.value.toLowerCase() !== v){ el.value = wanted; ev(el,'input'); ev(el,'change'); changed = true; }
+      }
+    });
+    return changed;
+  }
+
+  function hydrateFromUrl(instances){
+    if (appliedOnce) return;
+    const p = new URLSearchParams(location.search);
+    const tagVal = p.get('tags');
+    const catVal = p.get('kategorie');
+
+    let changed = false;
+
+    // dein sichtbares Multi Search Feld
+    const searchEl = document.getElementById('Search');
+    if (tagVal && searchEl) changed = setVal(searchEl, tagVal) || changed;
+
+    // kategorie je nach Control setzen, egal ob Radio, Checkbox oder Select
+    if (catVal){
+      const catInputs = document.querySelectorAll('[fs-cmsfilter-field="kategorie"]');
+      changed = setChoice(catInputs, catVal) || changed;
+    }
+
+    if (changed){
+      // einen Tick warten, dann filtern
+      setTimeout(()=> {
+        instances.forEach(inst => inst.applyFilters && inst.applyFilters(false));
+      }, 0);
+    }
+
+    appliedOnce = true;
+  }
+
+  window.fsAttributes = window.fsAttributes || [];
+  window.fsAttributes.push([
+    'cmsfilter',
+    (instances) => {
+      // direkt nach Init einmalig aus URL in die UI schreiben
+      hydrateFromUrl(instances);
+
+      // falls Items erst nachgeladen werden, erneut ein einziges Mal hydratisieren
+      window.fsAttributes.push([
+        'cmsload',
+        () => hydrateFromUrl(instances)
+      ]);
+    }
+  ]);
+})();
+</script>
+
+
+<!-- Hover-Play für CMS-Video-Karten: .u-link-cover → .hover-video (stumm/playsinline, Play bei Hover/Fokus/Touch, Stop beim Verlassen). Immer einbinden. Muss unter den FS-JS stehen. -->
+<script>document.addEventListener("DOMContentLoaded",()=>{document.querySelectorAll(".u-link-cover").forEach(link=>{const card=link.closest(".card");if(!card)return;const video=card.querySelector(".hover-video");if(!video)return;video.muted=true;video.setAttribute("muted","");video.setAttribute("playsinline","");video.preload="metadata";video.removeAttribute("controls");const safePlay=()=>{video.play().catch(()=>{video.muted=true;video.setAttribute("muted","");video.play().catch(()=>{})})};const stop=()=>{video.pause();video.currentTime=0};link.addEventListener("mouseenter",safePlay);link.addEventListener("mouseleave",stop);link.addEventListener("focusin",safePlay);link.addEventListener("focusout",stop);link.addEventListener("touchstart",safePlay,{passive:true})})});</script>
