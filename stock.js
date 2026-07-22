@@ -1,11 +1,11 @@
 /*!
- * kataloop-stock.js v2.0.0
+ * kataloop-stock.js v2.0.1
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
  *                       + die drei eigenen Snippets (History-Blocker,
  *                         URL-Übernahme, Hover-Video)
- * Keine externe Abhängigkeit. Eine Datei, ~9 KB.
+ * Keine externe Abhängigkeit. Eine Datei, ~12 KB.
  *
  * WARUM EIGENER CODE STATT FINSWEET
  * Finsweet lädt für „Blättern + Filtern" beim Seitenaufruf ALLE CMS-Seiten
@@ -587,7 +587,7 @@
   else start();
 
   window.klStock = {
-    version: "2.0.0",
+    version: "2.0.1",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
