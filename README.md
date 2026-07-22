@@ -1,13 +1,13 @@
 # Kataloop Stock — eigene Filter-, Blätter- und Video-Logik
 
 Ein Skript für alle Seiten mit der Stock-Collection. **Keine Fremdbibliothek**,
-keine Finsweet-Skripte mehr. Eine Datei, 17,7 KB (6,8 KB gzip).
+keine Finsweet-Skripte mehr. Eine Datei, 20,7 KB (7,8 KB gzip).
 
 - `stock.js` — Quelldatei (bearbeiten)
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.5.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.6.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.5.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.6.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -104,6 +104,12 @@ Die Hüllen **blenden weich ein und aus**, 300 ms linear (`CFG.blendenMs`).
 sichtbar geschaltet und dann die Deckkraft gefahren, beim Ausblenden
 umgekehrt. Ein laufender Ausblend-Timer bricht ab, wenn die Hülle vorher
 wieder gebraucht wird — bei kurzen Ladephasen passiert genau das.
+
+**Ausnahme Ladeanzeige** (`data-kl-zeigen="laden"`, ab v3.6.0): sie erscheint
+**ohne Einblend-Fade**, sofort voll sichtbar — sonst blitzt beim Laden erst ein
+halbtransparenter Zwischenzustand auf. Das **Ausblenden** bleibt auch hier weich
+(300 ms). Die 250-ms-Schwelle davor gilt weiter: sehr kurze Ladephasen zeigen gar
+keine Anzeige.
 
 **Im Designer** kommt um jede Komponente eine Hülle mit ihrer Rolle, versteckt
 über die vorhandene Klasse `u-d-none`:
@@ -173,9 +179,32 @@ Deine Klassen, dein Hover — die Klone sind echte Webflow-Elemente, das Skript
 setzt nur Text und Klick. Hat die Vorlage inneres Markup (Icon, Span), bekommt
 `[data-kl-vorschlag-text]` den Text, sonst der Chip selbst.
 
+**Großschreibung** (ab v3.6.0): der angezeigte Text beginnt mit einem
+Großbuchstaben. Die Wortart lässt sich nicht sicher erkennen (Nomen? Verb?),
+also pauschal groß — es werden ohnehin mehr Nomen gesucht. **Gesucht** wird
+weiter kleingeschrieben (die Suche ist case-insensitiv, Suchfeld und URL bleiben
+klein). Chip und Suchfeld sind dabei nie gleichzeitig zu sehen: ein Vorschlag
+stammt aus einem echten Motiv, der Klick liefert immer Treffer und der
+Leerzustand verschwindet.
+
 Alles außer der Vorlage ist die **feste Auswahl**: Gibt es echte Vorschläge,
 treten sie an ihre Stelle; gibt es keine, bleibt sie stehen. Den Container am
 besten **in** die Leer-Hülle legen, dann verschwindet er mit ihr.
+
+**Einleitender Text vor den Chips** (z. B. „Probiere:", ab v3.6.0): ein Element
+mit `data-kl-vorschlag-label` als **erstes Kind** des Containers. Es ist genau
+dann sichtbar, wenn Chips dastehen — echte Vorschläge **oder** feste Auswahl —
+und verschwindet nur im ganz leeren Container. Wichtig: das Label ist **kein**
+fester-Auswahl-Element; ohne das Attribut würde es wie die feste Auswahl
+behandelt und stünde genau falsch herum da (nur ohne Vorschläge).
+
+```html
+<div data-kl-vorschlaege>
+  <span data-kl-vorschlag-label>Probiere:</span>
+  <a data-kl-vorschlag-vorlage class="stock-check-btn …">Vorlage</a>
+  <a class="stock-check-btn …">Natur</a>
+</div>
+```
 
 Zahl der Vorschläge: `CFG.vorschlaegeMax` (4).
 

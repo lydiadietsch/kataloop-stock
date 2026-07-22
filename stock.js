@@ -53,13 +53,17 @@
  * wirklich gibt (Wortanfang, Umlaut-Varianten, Tippfehler). Ausgegeben werden
  * sie als Klone einer in Webflow gestalteten Vorlage:
  *   <div data-kl-vorschlaege>
+ *     <span data-kl-vorschlag-label>Probiere:</span>   ← optional, s. u.
  *     <a data-kl-vorschlag-vorlage class="…">Vorlage</a>
  *     <a class="…">Feste Auswahl, falls nichts passt</a>
  *   </div>
  * Hat die Vorlage inneres Markup, bekommt [data-kl-vorschlag-text] den Text.
+ * [data-kl-vorschlag-label] ist ein einleitender Text („Probiere:"), der VOR
+ * den Chips steht und nur sichtbar ist, solange welche da sind (echte
+ * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.5.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.6.0/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -661,6 +665,12 @@
     }
   }
 
+  /* Ersten Buchstaben groß — charAt/toUpperCase deckt auch Umlaute ab
+     (ä→Ä, ö→Ö, ü→Ü); ß steht am Wortanfang nie. */
+  function grossErster(w) {
+    return w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+  }
+
   function vorschlaegeBauen() {
     if (!vorschlagBox) return;
     qsa("[data-kl-vorschlag]", vorschlagBox).forEach(function (e) { e.remove(); });
@@ -672,7 +682,14 @@
       /* Hat die Vorlage inneres Markup (Icon, Span), wird nur der markierte
          Textträger befüllt — sonst der Chip selbst. */
       var ziel = qs("[data-kl-vorschlag-text]", chip) || chip;
-      ziel.textContent = wort;
+      /* ANGEZEIGT wird großgeschrieben: die Wortart (Nomen/Verb/Adjektiv) ist
+         nicht sicher erkennbar, also pauschal groß — es werden ohnehin mehr
+         Nomen gesucht. Gesucht wird weiter mit dem kleingeschriebenen `wort`
+         (die Suche ist case-insensitiv, Suchfeld/URL bleiben klein). Chip und
+         Suchfeld sind nie gleichzeitig zu sehen: ein Vorschlag stammt aus einem
+         echten Motiv, der Klick liefert immer Treffer und der Leerzustand
+         verschwindet. */
+      ziel.textContent = grossErster(wort);
       chip.addEventListener("click", function (e) {
         e.preventDefault();
         begriffSuchen(wort, true);
@@ -682,10 +699,22 @@
 
     /* Echte Treffer verdrängen die feste Auswahl; gibt es keine, bleibt sie
        stehen. Das ist der Hybrid: „Meintest du …?" wenn möglich, sonst die
-       gepflegten Chips. */
+       gepflegten Chips. Das Label bleibt dabei außen vor — es wird gleich
+       eigens geschaltet, sonst würde es wie feste Auswahl behandelt (also
+       genau falsch herum: nur SICHTBAR ohne Vorschläge). */
+    var festeChips = 0;
     Array.prototype.forEach.call(vorschlagBox.children, function (kind) {
       if (kind.hasAttribute("data-kl-vorschlag")) return;
+      if (kind.hasAttribute("data-kl-vorschlag-label")) return;
       kind.classList.toggle(CFG.verstecktKlasse, worte.length > 0);
+      festeChips++;
+    });
+
+    /* Das „Probiere:"-Label steht über den Chips und verschwindet nur, wenn
+       gar keine da sind — sichtbar bei echten Vorschlägen ODER fester Auswahl. */
+    var hatChips = worte.length > 0 || festeChips > 0;
+    qsa("[data-kl-vorschlag-label]", vorschlagBox).forEach(function (label) {
+      label.classList.toggle(CFG.verstecktKlasse, !hatChips);
     });
     log("Vorschläge:", worte.length ? worte.join(", ") : "keine (feste Auswahl)");
   }
@@ -723,12 +752,24 @@
   var AUS = "kl-aus";
   var blendTimer = new WeakMap();
 
-  function huelleSchalten(el, an) {
+  function huelleSchalten(el, an, sofort) {
     var t = blendTimer.get(el);
     if (t) { clearTimeout(t); blendTimer.delete(el); }
     var offen = !el.classList.contains(CFG.verstecktKlasse);
     if (an) {
       if (offen && !el.classList.contains(AUS)) return;      // schon sichtbar
+      if (sofort) {
+        /* Ohne Einblend-Fade: die Ladeanzeige soll sofort voll dastehen, sonst
+           blitzt erst ein halbtransparenter Zwischenzustand auf. transition
+           kurz aus, damit auch ein noch laufendes Ausblenden nicht weich
+           zurueckfaedt; danach wieder an, damit das AUSblenden weich bleibt. */
+        el.style.transition = "none";
+        el.classList.remove(AUS);
+        el.classList.remove(CFG.verstecktKlasse);
+        void el.offsetWidth;
+        el.style.transition = "";
+        return;
+      }
       el.classList.add(AUS);
       el.classList.remove(CFG.verstecktKlasse);
       void el.offsetWidth;
@@ -799,7 +840,11 @@
 
     qsa("[data-kl-zeigen]").forEach(function (el) {
       var rolle = el.getAttribute("data-kl-zeigen");
-      huelleSchalten(el, rolle === "ende" ? ende : rolle === zustand);
+      var an = rolle === "ende" ? ende : rolle === zustand;
+      /* Die Ladeanzeige erscheint OHNE Einblend-Fade (sofort voll da), damit
+         beim Laden nichts halbtransparent aufblitzt; „leer" und „ende" blenden
+         weiter weich ein. Das Ausblenden bleibt bei allen weich. */
+      huelleSchalten(el, an, rolle === "laden");
     });
 
     /* Gegenvorschläge nur neu bauen, wenn sich der Begriff geändert hat —
@@ -1264,7 +1309,7 @@
   else start();
 
   window.klStock = {
-    version: "3.5.0",
+    version: "3.6.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
