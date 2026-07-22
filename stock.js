@@ -1,5 +1,5 @@
 /*!
- * kataloop-stock.js v2.1.0
+ * kataloop-stock.js v3.0.0
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
@@ -28,7 +28,7 @@
  * Beide Schreibweisen funktionieren gleichzeitig.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.1.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.0.0/stock.min.js"></script>
  *
  * Ereignis für eigene Skripte (z. B. das Grid-Skript):
  *   window.addEventListener("kl:rendered", e => e.detail.items)
@@ -99,6 +99,7 @@
   var proSeite = 0;
   var gesamtSeiten = 1;
   var pagParam = "";          // z. B. "e19e26fd_page"
+  var gesamtSicher = false;   // ist die Seitenzahl verlässlich bekannt?
 
   function feldWerte(el) {
     var map = {};
@@ -126,20 +127,28 @@
   if (!seiten[1].length) seiten[1] = qsa(".w-dyn-item", itemsBox).map(bauItem);
   proSeite = seiten[1].length || 1;
 
-  /* Seitenzahl + Parameter aus der vorhandenen Blätter-Leiste lesen. */
+  /* Seitenzahl + Parameter aus dem Markup lesen.
+     Webflow rendert im Blätter-Bereich ein verstecktes Element
+     <div class="w-page-count">1 / 31</div> (bzw. aria-label "Page 1 of 31").
+     Damit ist die Gesamtzahl OHNE einen einzigen Abruf bekannt — genau daraus
+     liest auch Finsweet sie. Fehlt das Element, greift die Sprungsuche unten. */
   (function ermittlePaginierung() {
     var href = (weiterBtn && weiterBtn.getAttribute("href")) || "";
     var m = href.match(/[?&]([^=]*_page)=(\d+)/);
     if (m) pagParam = m[1];
-    var zahlen = qsa('[fs-cmsload-element="page-button"], [data-kl-page-button]')
-      .map(function (b) { return parseInt(b.textContent.trim(), 10); })
-      .filter(function (n) { return !isNaN(n); });
-    qsa("a[href*='_page=']").forEach(function (a) {
-      var mm = a.getAttribute("href").match(/[?&]([^=]*_page)=(\d+)/);
-      if (mm) { pagParam = pagParam || mm[1]; zahlen.push(parseInt(mm[2], 10)); }
-    });
-    gesamtSeiten = zahlen.length ? Math.max.apply(null, zahlen) : 1;
-    log("Paginierung:", pagParam, "Seiten:", gesamtSeiten, "pro Seite:", proSeite);
+    if (!pagParam) {
+      qsa("a[href*='_page=']").forEach(function (a) {
+        var mm = a.getAttribute("href").match(/[?&]([^=]*_page)=(\d+)/);
+        if (mm && !pagParam) pagParam = mm[1];
+      });
+    }
+    var zaehler = qs(".w-page-count, [data-kl-page-count]");
+    if (zaehler) {
+      var txt = (zaehler.textContent || "") + " " + (zaehler.getAttribute("aria-label") || "");
+      var z = txt.match(/(\d+)\s*(?:\/|of|von)\s*(\d+)/i);
+      if (z) { gesamtSeiten = parseInt(z[2], 10) || 1; gesamtSicher = true; }
+    }
+    log("Paginierung:", pagParam, "| Seiten:", gesamtSeiten, gesamtSicher ? "(aus w-page-count)" : "(unbekannt)", "| pro Seite:", proSeite);
   })();
 
   /* ── Nachladen ─────────────────────────────────────────────────── */
@@ -193,7 +202,6 @@
      sie laufen im Hintergrund, und jede geholte Seite bleibt im Speicher —
      für späteres Blättern oder Filtern ist sie damit schon da.
      Das Ergebnis liegt in der sessionStorage: pro Sitzung also EINMAL. */
-  var gesamtSicher = false;
   var schluessel = "kl-stock-seiten:" + location.pathname;
 
   function ausSpeicher() {
@@ -247,15 +255,17 @@
     });
   }
 
-  /* Katalog laden — in parallelen Wellen, bis eine Seite leer zurückkommt.
-     Kein Vorab-Suchen der Seitenzahl mehr: das lief sequenziell und kostete
-     vor dem eigentlichen Laden mehrere Sekunden. Nach jeder Welle wird neu
-     gezeichnet, damit sofort Treffer sichtbar sind statt eines leeren Wartens. */
-  function alleHolen(zwischenstand) {
+  /* Katalog laden.
+     Ist die Seitenzahl bekannt (Normalfall), werden alle fehlenden Seiten
+     in Wellen geholt — im Vordergrund breit (schnell), im Hintergrund
+     schmaler und mit Leerlauf-Pause dazwischen, damit das Parsen der
+     Dokumente die Seite nicht ruckeln lässt.
+     Ohne Seitenzahl (Element fehlt) wird gesucht, bis eine Seite leer ist. */
+  function alleHolen(zwischenstand, hintergrund) {
     if (alleGeladen) return Promise.resolve();
     if (ladeVersprechen) return ladeVersprechen;
-    ladeAnzeige(true);
-    var welle = 8, n = 2, ende = false;
+    var welle = hintergrund ? 6 : 12, n = 2, ende = false;
+    if (!hintergrund) ladeAnzeige(true);
 
     function naechste() {
       if (ende) return Promise.resolve();
@@ -269,10 +279,12 @@
       return Promise.all(jobs).then(function (res) {
         res.forEach(function (items, i) {
           if (items.length) gesamtSeiten = Math.max(gesamtSeiten, nummern[i]);
-          else ende = true;                       // hinter dem Katalog-Ende
+          else if (!gesamtSicher) ende = true;      // Ende des Katalogs gefunden
         });
         if (zwischenstand) zwischenstand();
-        return ende ? Promise.resolve() : naechste();
+        if (ende) return;
+        return hintergrund ? new Promise(function (fertig) { idle(function () { fertig(naechste()); }, 300); })
+                           : naechste();
       });
     }
 
@@ -280,9 +292,16 @@
       alleGeladen = true; gesamtSicher = true; ladeVersprechen = null;
       inSpeicher(gesamtSeiten);
       ladeAnzeige(false);
-      log("Katalog geladen:", gesamtSeiten, "Seiten");
+      log("Katalog vollständig:", gesamtSeiten, "Seiten");
+    }, function (e) {
+      ladeVersprechen = null; ladeAnzeige(false); log("Katalog-Fehler", e);
     });
     return ladeVersprechen;
+  }
+
+  function idle(fn, delay) {
+    if (window.requestIdleCallback) requestIdleCallback(fn, { timeout: (delay || 300) + 1200 });
+    else setTimeout(fn, delay || 300);
   }
 
   function alleItems() {
@@ -382,12 +401,19 @@
       if (seite > seitenZahl) seite = 1;
       render(t.slice((seite - 1) * proSeite, seite * proSeite), seitenZahl);
     };
+    if (alleGeladen) {                     // alles da → sofort und ohne Balken
+      ladeAnzeige(false);
+      zeichneTreffer();
+      if (scrollen) nachObenScrollen();
+      return;
+    }
     ladeAnzeige(true);                     // SOFORT sichtbar, vor dem ersten Abruf
     zeichneTreffer();                      // zeigt schon, was bereits geladen ist
     alleHolen(zeichneTreffer).then(function () {
       zeichneTreffer();
+      ladeAnzeige(false);                  // MUSS in jedem Fall aus (war der Hänger)
       if (scrollen) nachObenScrollen();
-    });
+    }, function () { ladeAnzeige(false); });
   }
 
   /* ── Blätter-Leiste ────────────────────────────────────────────── */
@@ -517,7 +543,12 @@
     });
     if (suchFeld && suchFeld.value.trim()) p.set(CFG.suchParam, suchFeld.value.trim());
     if (seite > 1) p.set(pagParam, String(seite));
-    var neu = location.pathname + (p.toString() ? "?" + p.toString() : "") + location.hash;
+    /* URLSearchParams kodiert Kommas als %2C. In einer Query ist das Komma
+       laut RFC 3986 erlaubt — also selbst zusammenbauen, das liest sich besser:
+       ?kategorie=natur,tiere statt ?kategorie=natur%2Ctiere */
+    var teile = [];
+    p.forEach(function (v, k) { teile.push(encodeURIComponent(k) + "=" + encodeURIComponent(v).replace(/%2C/gi, ",")); });
+    var neu = location.pathname + (teile.length ? "?" + teile.join("&") : "") + location.hash;
     if (neu !== location.pathname + location.search + location.hash) history.pushState({ kl: 1 }, "", neu);
   }
 
@@ -627,18 +658,25 @@
        server-gerenderte Seite-1-Markup unangetastet stehen (schnellster Start). */
     if (istGefiltert() || seite !== 1) zeichne(false);
     else paginationBauen(gesamtSeiten);
-    /* Seitenzahl im Hintergrund ermitteln — blockiert nichts und macht die
-       Blätter-Leiste vollständig. Ergebnis gilt für die ganze Sitzung. */
-    var spaeter = function () { if (!ladeVersprechen && !alleGeladen) gesamtErmitteln(); };
-    if (window.requestIdleCallback) requestIdleCallback(spaeter, { timeout: 4000 });
-    else setTimeout(spaeter, 2000);
+    /* Katalog im HINTERGRUND vorladen, sobald die Seite fertig ist.
+       Der erste Bildaufbau bleibt unangetastet (nichts davor), aber wer nach
+       ein paar Sekunden filtert, bekommt das Ergebnis sofort — das ist der
+       Punkt, an dem die alte Fassung sich zäh angefühlt hat. */
+    var vorladen = function () {
+      if (!ladeVersprechen && !alleGeladen) {
+        if (!gesamtSicher && pagParam) gesamtErmitteln().then(function () { alleHolen(null, true); });
+        else alleHolen(null, true);
+      }
+    };
+    if (d.readyState === "complete") idle(vorladen, 800);
+    else window.addEventListener("load", function () { idle(vorladen, 800); });
     log("bereit", { seiten: gesamtSeiten, proSeite: proSeite, param: pagParam });
   }
   if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", start);
   else start();
 
   window.klStock = {
-    version: "2.1.0",
+    version: "3.0.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,

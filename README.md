@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 12 KB.
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.1.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.0.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.1.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.0.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -74,31 +74,31 @@ umbenennen willst — beide Schreibweisen funktionieren gleichzeitig:
 
 ---
 
-## Der entscheidende Unterschied: wann geladen wird
-
-Finsweet muss für „Blättern **und** Filtern" den ganzen Katalog kennen und holt
-ihn deshalb bei **jedem** Seitenaufruf komplett: gemessen **30 Anfragen, ~1,9 MB**,
-jede ~730 ms — bevor irgendjemand gefiltert hat.
-
-Dieses Skript unterscheidet:
+## Wann was geladen wird
 
 | Aktion | Kosten |
 |---|---|
-| Seite öffnen | **0 Anfragen** — Seite 1 steht bereits im HTML |
-| Blättern | **1 Anfrage** pro Seite (~64 KB), danach im Speicher |
-| Seitenzahl bestimmen | **~9 Anfragen einmal pro Sitzung**, im Hintergrund (siehe unten) |
-| Filtern/Suchen | erst dann der ganze Katalog, **einmal**, in parallelen Wellen (8 gleichzeitig) mit Ladebalken und Zwischenständen |
+| Seite öffnen | **0 Abrufe** — Seite 1 steht im HTML, die Seitenzahl auch |
+| Blättern | 1 Abruf, meist 0 (Seite liegt schon vom Vorladen bereit) |
+| Filtern/Suchen | **0 Abrufe**, sobald das Vorladen durch ist |
 
-**Warum überhaupt eine Suche nach der Seitenzahl?** Webflow schreibt die
-Gesamtzahl nirgends ins HTML (kein `rel="next"`, und Bereichs-Anfragen
-beantwortet der CDN mit dem vollen Dokument). Statt alle 30 Seiten zu holen,
-sucht das Skript das Ende per Sprungsuche: 2, 4, 8, 16, 32 … bis eine Seite leer
-ist, dann halbieren — **9 statt 30 Abrufe**, und jede dabei geholte Seite bleibt
-im Speicher (Blättern dorthin kostet später nichts). Das Ergebnis liegt 30 Minuten
-in der `sessionStorage`, gilt also für die ganze Sitzung inklusive
-Detailseiten-Besuchen.
+**Die Seitenzahl steht im Markup.** Webflow rendert im Blätter-Bereich ein
+verstecktes `<div class="w-page-count">1 / 31</div>`. Daraus liest das Skript die
+Gesamtzahl — ohne einen einzigen Abruf. (Genau daraus liest sie auch Finsweet.)
+Fehlt das Element auf einer Seite, sucht das Skript das Ende per Sprungsuche.
 
----
+**Der Katalog wird im Hintergrund vorgeladen**, sobald die Seite fertig ist
+(nach `load` + Leerlauf), in Wellen zu sechs mit Leerlauf-Pause dazwischen —
+so blockiert weder das Holen noch das Auswerten der Dokumente die Seite.
+Wer nach ein paar Sekunden filtert, bekommt das Ergebnis sofort.
+
+**Klickt jemand früher**, ist trotzdem alles in Ordnung: der Ladebalken erscheint
+synchron (4 ms gemessen), die bereits geladenen Treffer stehen sofort, der Rest
+wächst nach. Kein leeres Warten.
+
+Der Unterschied zu Finsweet liegt im Zeitpunkt, nicht in der Menge: Finsweet holt
+den Katalog **während** des Seitenaufbaus (blockiert Bilder und Hauptthread),
+dieses Skript **danach**.
 
 ## Was sonst gelöst ist
 
