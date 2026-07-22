@@ -1,5 +1,5 @@
 /*!
- * kataloop-stock.js v2.0.1
+ * kataloop-stock.js v2.0.2
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
@@ -28,7 +28,7 @@
  * Beide Schreibweisen funktionieren gleichzeitig.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.1/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.2/stock.min.js"></script>
  *
  * Ereignis für eigene Skripte (z. B. das Grid-Skript):
  *   window.addEventListener("kl:rendered", e => e.detail.items)
@@ -587,7 +587,7 @@
   else start();
 
   window.klStock = {
-    version: "2.0.1",
+    version: "2.0.2",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
