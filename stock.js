@@ -1,5 +1,5 @@
 /*!
- * kataloop-stock.js v2.0.2
+ * kataloop-stock.js v2.1.0
  * Eigene Filter-, Blätter- und Video-Logik für die Stock-Collection.
  * -----------------------------------------------------------------------------
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
@@ -28,7 +28,7 @@
  * Beide Schreibweisen funktionieren gleichzeitig.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.2/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.1.0/stock.min.js"></script>
  *
  * Ereignis für eigene Skripte (z. B. das Grid-Skript):
  *   window.addEventListener("kl:rendered", e => e.detail.items)
@@ -143,8 +143,25 @@
   })();
 
   /* ── Nachladen ─────────────────────────────────────────────────── */
+  /* Rückmeldung MUSS sofort kommen — der eingebaute Loader sitzt unten in der
+     Blätter-Leiste und ist beim Filtern gar nicht im Bild. Deshalb zusätzlich
+     ein Balken direkt über der Liste und ein Ausgrauen der Karten. */
+  var stil = d.createElement("style");
+  stil.textContent =
+    ".kl-laedt{position:relative}" +
+    ".kl-laedt::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;z-index:5;" +
+      "background:linear-gradient(90deg,transparent,currentColor,transparent);background-size:40% 100%;" +
+      "background-repeat:no-repeat;animation:kl-lauf 1.1s linear infinite;opacity:.75}" +
+    "@keyframes kl-lauf{0%{background-position:-40% 0}100%{background-position:140% 0}}" +
+    ".kl-laedt .w-dyn-items{opacity:.45;transition:opacity .2s}" +
+    "[data-kl-filters].kl-warte,[fs-cmsfilter-element='filters'].kl-warte{cursor:progress}" +
+    "@media (prefers-reduced-motion: reduce){.kl-laedt::before{animation:none;background:currentColor;opacity:.4}}";
+  d.head.appendChild(stil);
+
   function ladeAnzeige(an) {
-    if (loader) loader.style.display = an ? "" : "none";
+    if (loader) { loader.style.display = an ? "" : "none"; loader.style.opacity = an ? "1" : "0"; }
+    listWrap.classList.toggle("kl-laedt", an);
+    if (filterForm) filterForm.classList.toggle("kl-warte", an);
     listWrap.setAttribute("aria-busy", an ? "true" : "false");
   }
 
@@ -230,29 +247,40 @@
     });
   }
 
-  /* Alle Seiten holen — nur nötig, sobald wirklich gefiltert wird. */
-  function alleHolen() {
+  /* Katalog laden — in parallelen Wellen, bis eine Seite leer zurückkommt.
+     Kein Vorab-Suchen der Seitenzahl mehr: das lief sequenziell und kostete
+     vor dem eigentlichen Laden mehrere Sekunden. Nach jeder Welle wird neu
+     gezeichnet, damit sofort Treffer sichtbar sind statt eines leeren Wartens. */
+  function alleHolen(zwischenstand) {
     if (alleGeladen) return Promise.resolve();
     if (ladeVersprechen) return ladeVersprechen;
-    if (!gesamtSicher) {                       // erst wissen, wie viele Seiten es sind
-      ladeAnzeige(true);
-      return (ladeVersprechen = gesamtErmitteln().then(function () {
-        ladeVersprechen = null; return alleHolen();
-      }));
-    }
     ladeAnzeige(true);
-    var offen = [];
-    for (var n = 2; n <= gesamtSeiten; n++) if (!seiten[n]) offen.push(n);
-    log("hole", offen.length, "Seiten");
-    var i = 0;
+    var welle = 8, n = 2, ende = false;
+
     function naechste() {
-      if (i >= offen.length) return Promise.resolve();
-      return seiteHolen(offen[i++]).then(naechste);
+      if (ende) return Promise.resolve();
+      var jobs = [], nummern = [];
+      for (var i = 0; i < welle; i++) {
+        if (gesamtSicher && n > gesamtSeiten) { ende = true; break; }
+        if (n > 4096) { ende = true; break; }
+        nummern.push(n); jobs.push(seiteHolen(n)); n++;
+      }
+      if (!jobs.length) return Promise.resolve();
+      return Promise.all(jobs).then(function (res) {
+        res.forEach(function (items, i) {
+          if (items.length) gesamtSeiten = Math.max(gesamtSeiten, nummern[i]);
+          else ende = true;                       // hinter dem Katalog-Ende
+        });
+        if (zwischenstand) zwischenstand();
+        return ende ? Promise.resolve() : naechste();
+      });
     }
-    var spuren = [];
-    for (var s = 0; s < CFG.ladeGleichzeitig; s++) spuren.push(naechste());
-    ladeVersprechen = Promise.all(spuren).then(function () {
-      alleGeladen = true; ladeVersprechen = null; ladeAnzeige(false);
+
+    ladeVersprechen = naechste().then(function () {
+      alleGeladen = true; gesamtSicher = true; ladeVersprechen = null;
+      inSpeicher(gesamtSeiten);
+      ladeAnzeige(false);
+      log("Katalog geladen:", gesamtSeiten, "Seiten");
     });
     return ladeVersprechen;
   }
@@ -331,8 +359,8 @@
     zeigeLeer(liste.length === 0);
     paginationBauen(seitenZahl);
     videosBinden(itemsBox);
-    /* Webflow-Interaktionen für neu eingehängte Karten neu anmelden. */
-    try { if (window.Webflow && window.Webflow.require) window.Webflow.require("ix2").init(); } catch (e) {}
+    /* KEIN ix2.init() hier: das setzt sämtliche Interaktions-Zustände der Seite
+       zurück (unter anderem den aktiven Filter-Chip) und kostet spürbar Zeit. */
     window.dispatchEvent(new CustomEvent("kl:rendered", { detail: { items: liste.map(function (i) { return i.el; }) } }));
   }
 
@@ -348,11 +376,16 @@
       });
       return;
     }
-    alleHolen().then(function () {
+    var zeichneTreffer = function () {
       var t = treffer();
       var seitenZahl = Math.max(1, Math.ceil(t.length / proSeite));
       if (seite > seitenZahl) seite = 1;
       render(t.slice((seite - 1) * proSeite, seite * proSeite), seitenZahl);
+    };
+    ladeAnzeige(true);                     // SOFORT sichtbar, vor dem ersten Abruf
+    zeichneTreffer();                      // zeigt schon, was bereits geladen ist
+    alleHolen(zeichneTreffer).then(function () {
+      zeichneTreffer();
       if (scrollen) nachObenScrollen();
     });
   }
@@ -440,11 +473,25 @@
   var sperre = false;
 
   function setzeBox(s, an) {
-    if (s.input.checked === an) return false;
+    var geaendert = s.input.checked !== an;
     s.input.checked = an;
     var box = s.label.querySelector(".w-checkbox-input");   // Webflow zeichnet die Box als DIV
     if (box) box.classList.toggle("w--redirected-checked", an);
-    return true;
+    optikEins(s, an);
+    return geaendert;
+  }
+
+  /* Der gelbe Aktiv-Zustand hängt an der Klasse .fs-cmsfilter_active auf dem
+     Label (so hat Finsweet ihn gesetzt, so ist er im Designer gestylt).
+     Beim Klick setzt sie sonst niemand mehr — also machen wir das. */
+  function optikEins(s, an) {
+    s.label.classList.toggle("fs-cmsfilter_active", an);
+    s.label.classList.toggle("kl-aktiv", an);              // neutrale Zweitklasse
+  }
+  function optikSync() {
+    CFG.urlFelder.forEach(function (feld) {
+      steuerungen(feld).forEach(function (s) { optikEins(s, s.input.checked); });
+    });
   }
 
   function urlLesen() {
@@ -455,6 +502,7 @@
       steuerungen(feld).forEach(function (s) { setzeBox(s, soll.indexOf(s.wert) !== -1); });
     });
     if (suchFeld) suchFeld.value = p.get(CFG.suchParam) || "";
+    optikSync();
     var sn = parseInt(p.get(pagParam) || "1", 10);
     seite = isNaN(sn) || sn < 1 ? 1 : sn;
     sperre = false;
@@ -477,12 +525,15 @@
   if (filterForm) {
     filterForm.addEventListener("change", function (e) {
       if (!e.target.closest("label")) return;
+      optikSync();                                        // gelber Aktiv-Zustand
+      ladeAnzeige(true);                                  // sofort Rückmeldung
       seite = 1; urlSchreiben(); zeichne(false);          // Filtern scrollt NICHT
     });
     filterForm.addEventListener("submit", function (e) { e.preventDefault(); });
   }
   if (suchFeld) {
     suchFeld.addEventListener("input", function () {
+      ladeAnzeige(true);
       clearTimeout(tippTimer);
       tippTimer = setTimeout(function () { seite = 1; urlSchreiben(); zeichne(false); }, 250);
     });
@@ -578,7 +629,7 @@
     else paginationBauen(gesamtSeiten);
     /* Seitenzahl im Hintergrund ermitteln — blockiert nichts und macht die
        Blätter-Leiste vollständig. Ergebnis gilt für die ganze Sitzung. */
-    var spaeter = function () { gesamtErmitteln(); };
+    var spaeter = function () { if (!ladeVersprechen && !alleGeladen) gesamtErmitteln(); };
     if (window.requestIdleCallback) requestIdleCallback(spaeter, { timeout: 4000 });
     else setTimeout(spaeter, 2000);
     log("bereit", { seiten: gesamtSeiten, proSeite: proSeite, param: pagParam });
@@ -587,7 +638,7 @@
   else start();
 
   window.klStock = {
-    version: "2.0.2",
+    version: "2.1.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,

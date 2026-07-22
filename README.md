@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 12 KB.
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.2/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.1.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.0.2/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v2.1.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -87,7 +87,7 @@ Dieses Skript unterscheidet:
 | Seite öffnen | **0 Anfragen** — Seite 1 steht bereits im HTML |
 | Blättern | **1 Anfrage** pro Seite (~64 KB), danach im Speicher |
 | Seitenzahl bestimmen | **~9 Anfragen einmal pro Sitzung**, im Hintergrund (siehe unten) |
-| Filtern/Suchen | erst dann der ganze Katalog, **einmal**, mit Ladeanzeige |
+| Filtern/Suchen | erst dann der ganze Katalog, **einmal**, in parallelen Wellen (8 gleichzeitig) mit Ladebalken und Zwischenständen |
 
 **Warum überhaupt eine Suche nach der Seitenzahl?** Webflow schreibt die
 Gesamtzahl nirgends ins HTML (kein `rel="next"`, und Bereichs-Anfragen
@@ -112,6 +112,8 @@ Detailseiten-Besuchen.
 | `?kategorie=…` von der Detailseite | wird beim Laden übernommen, inklusive Webflow-Checkbox-Optik |
 | unsaubere URLs | geschrieben werden nur `?kategorie=&typ=&lizenz=&ausrichtung=&tags=` (+ Seitenzahl); Zurück-Taste funktioniert |
 | Umlaute in der Suche | „Städte" findet „staedte" und umgekehrt |
+| Aktiver Filter bleibt farblos | Die gelbe Optik hängt an `.stock-check-btn.fs-cmsfilter_active` — diese Klasse setzt das Skript jetzt selbst (zusätzlich `.kl-aktiv`), auch beim Laden aus der URL |
+| „Ich klicke und nichts passiert" | Ladebalken über der Liste + ausgegraute Karten **synchron beim Klick** (nach 9 ms gemessen), Treffer werden nach jeder Lade-Welle nachgezogen |
 
 ---
 
