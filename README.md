@@ -1,13 +1,13 @@
 # Kataloop Stock — eigene Filter-, Blätter- und Video-Logik
 
 Ein Skript für alle Seiten mit der Stock-Collection. **Keine Fremdbibliothek**,
-keine Finsweet-Skripte mehr. Eine Datei, 20,7 KB (7,8 KB gzip).
+keine Finsweet-Skripte mehr. Eine Datei, 21,3 KB (8,1 KB gzip).
 
 - `stock.js` — Quelldatei (bearbeiten)
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.6.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.8.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.6.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.8.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -74,6 +74,56 @@ umbenennen willst — beide Schreibweisen funktionieren gleichzeitig:
 
 ---
 
+## Alle `data-kl-`-Attribute auf einen Blick
+
+Referenz für die Stock-Übersicht (`/stockfotos-videos`). Details in den
+jeweiligen Abschnitten unten.
+
+**Struktur — du setzt sie im Designer** (oder nutzt die `fs-…`-Entsprechung, s. o.):
+
+| Attribut | wohin | Zweck |
+|---|---|---|
+| `data-kl-list` | Collection-Liste | die Stock-Liste |
+| `data-kl-filters` | Filter-Form | Container der Filter |
+| `data-kl-field="kategorie"` | Filter-Wert | ein Filterfeld (kategorie, typ, lizenz, …) |
+| `data-kl-page-button` | Blätter-Leiste | Vorlage für die Seitenzahlen |
+| `data-kl-page-dots` | Blätter-Leiste | Vorlage für „…" |
+| `data-kl-loader` | Ladeanzeige | die vorhandene Webflow-Ladeanzeige |
+
+**Status am `<html>` — das Skript setzt sie** (Code-Komponenten im Shadow DOM lesen sie):
+
+| Attribut | Werte |
+|---|---|
+| `data-kl-liste` | `laden` · `treffer` · `leer` |
+| `data-kl-ende` | gesetzt nur auf der echten letzten Seite (nie auf Seite 1, s. u.) |
+| `data-kl-suche` | reiner Suchbegriff |
+| `data-kl-auswahl` | Suchbegriff **+** angehakte Filter (lesbar, z. B. `hund, Natur, Video`) |
+
+**Status-Hüllen — du setzt sie im Designer**, das Skript schaltet nur `u-d-none`:
+
+| Attribut | Zweck |
+|---|---|
+| `data-kl-zeigen="leer"` | Hülle um „Kein Bild gefunden" |
+| `data-kl-zeigen="ende"` | Hülle um „Ende der Liste" |
+| `data-kl-zeigen="laden"` | Hülle um die Ladeanzeige (erscheint ohne Fade) |
+| `data-kl-text="suche"` | wird mit dem Suchbegriff befüllt |
+| `data-kl-text="anzahl"` | Trefferzahl (nur wenn sie feststeht) |
+| `data-kl-text="auswahl"` | Suchbegriff + Filter, lesbar |
+
+**Gegenvorschläge — in der Leer-Hülle:**
+
+| Attribut | Zweck |
+|---|---|
+| `data-kl-vorschlaege` | Container der Vorschläge |
+| `data-kl-vorschlag-vorlage` | ein Chip als Klon-Vorlage |
+| `data-kl-vorschlag-text` | Textträger im Chip (falls inneres Markup) |
+| `data-kl-vorschlag-label` | einleitender Text „Probiere:" (nur sichtbar, wenn Chips dastehen) |
+
+**Ereignis:** `window.dispatchEvent(new CustomEvent("kl:neu-suchen"))` setzt Filter
++ Suche zurück (auch `window.klStock.neueSuche()`).
+
+---
+
 ## Statusanzeigen (ab v3.4.0, Blenden ab v3.5.0)
 
 Für die Webflow-Komponenten „Kein Bild gefunden" und „Ende der Liste". Das
@@ -85,7 +135,7 @@ Webflow.
 | Attribut | Werte |
 |---|---|
 | `data-kl-liste` | `laden` · `treffer` · `leer` |
-| `data-kl-ende` | gesetzt, sobald die letzte Seite erreicht ist |
+| `data-kl-ende` | gesetzt, **nur** wenn die letzte Seite erreicht ist UND die Seitenzahl feststeht (nie auf Seite 1 von 31 — s. o.) |
 | `data-kl-suche` | der reine Suchbegriff |
 | `data-kl-auswahl` | die **ganze** Auswahl: Suchbegriff, dann jeder angehakte Filter |
 
@@ -218,10 +268,24 @@ Zahl der Vorschläge: `CFG.vorschlaegeMax` (4).
 | Blättern | 1 Abruf, meist 0 (Seite liegt schon vom Vorladen bereit) |
 | Filtern/Suchen | **0 Abrufe**, sobald das Vorladen durch ist |
 
-**Die Seitenzahl steht im Markup.** Webflow rendert im Blätter-Bereich ein
-verstecktes `<div class="w-page-count">1 / 31</div>`. Daraus liest das Skript die
-Gesamtzahl — ohne einen einzigen Abruf. (Genau daraus liest sie auch Finsweet.)
-Fehlt das Element auf einer Seite, sucht das Skript das Ende per Sprungsuche.
+**Die Seitenzahl** liest das Skript idealerweise aus dem Markup: Webflow rendert
+im Blätter-Bereich ein `<div class="w-page-count">1 / 31</div>` (bzw. ein
+aria-label „…of 31") — solange die Collection-Liste eine feste Item-Zahl pro
+Seite hat. **ACHTUNG — aktuell ist das Element LIVE aber LEER** (` / ` ohne
+Zahlen; die Webflow-Einstellung liefert sie zurzeit nicht). Dann ermittelt das
+Skript die Seitenzahl per **Sprungsuche** (exponentiell hoch, dann binär,
+~5 Abrufe) — **ab v3.8.0 früh beim Start** statt erst im Vorlade-Leerlauf, sonst
+fehlt die Pagination mehrere Sekunden.
+
+> **Verbindlich (v3.8.0-Fix, war eine Katastrophe):** Solange die Gesamtzahl
+> NICHT feststeht — leeres/fehlendes `w-page-count` und Sprungsuche noch nicht
+> durch —, meldet das Skript **NIEMALS** `data-kl-ende`. Sonst stünde der
+> „Ende der Liste"-Button auf **Seite 1 von 31**, und die Nutzer denken, das war
+> alles. „Ende" gilt ungefiltert nur, wenn die Zahl sicher ist (`gesamtSicher`)
+> oder es gar keine Pagination gibt (kein `_page`-Parameter = keine zweite
+> Seite). Getestet mit UND ohne leeres `w-page-count` (Audit `pruefstand/audit.js`,
+> je 23/23; Prüfstand 78/78). **Wenn Webflow die Seitenzahl je wieder ins Markup
+> rendert, wird die Sprungsuche automatisch übersprungen** — beide Fälle laufen.
 
 **Der Katalog wird im Hintergrund vorgeladen**, sobald die Seite fertig ist
 (nach `load` + Leerlauf), in Wellen zu sechs mit Leerlauf-Pause dazwischen —
@@ -235,6 +299,19 @@ wächst nach. Kein leeres Warten.
 Der Unterschied zu Finsweet liegt im Zeitpunkt, nicht in der Menge: Finsweet holt
 den Katalog **während** des Seitenaufbaus (blockiert Bilder und Hauptthread),
 dieses Skript **danach**.
+
+**Die ersten Bilder werden priorisiert** (ab v3.8.0). Webflow gibt allen
+Grid-Karten `loading="lazy"` — auch der obersten Reihe (am Staging-HTML gezählt:
+168 lazy, 1 eager). Lazy-Bilder bekommen in Chrome **niedrige Netzwerk-Priorität**,
+was das LCP kostet. Das Skript setzt den ersten *N* Karten von Seite 1
+`loading="eager"` + `fetchpriority="high"` — und zwar so früh wie möglich (beim
+Skript-Lauf, nicht erst bei `DOMContentLoaded`), damit der Browser die Priorität
+noch vor dem Fetch sieht. *N* richtet sich nach der Viewport-Breite
+(`CFG.eagerStufen`, `[abBreite, anzahl]`): auf großen Monitoren bis 26, auf Mobile
+(< 768) keine — dort ist meist ein Hero das LCP, nicht das Grid. Nur Seite 1; beim
+Blättern zählt der LCP-Hebel nicht. Bewusst **ohne** `getBoundingClientRect`: das
+erzwänge ein Reflow, und das Raster-Layout muss zu dem frühen Zeitpunkt noch nicht
+stehen — die Stufen decken den sichtbaren Bereich je Breite ab.
 
 ## Was sonst gelöst ist
 

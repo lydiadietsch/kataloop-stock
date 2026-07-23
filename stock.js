@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.6.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.8.0/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -90,7 +90,12 @@
     seitenAnfangId: "nav-top",     // Scrollziel für „Neue Suche starten"
     ladenAbMs: 250,                // so lange muss geladen werden, bis „laden" gemeldet wird
     vorschlaegeMax: 4,             // so viele Gegenvorschläge höchstens
-    blendenMs: 300                 // Ein-/Ausblenden der Status-Hüllen
+    blendenMs: 300,                // Ein-/Ausblenden der Status-Hüllen
+    /* Die ersten Bilder above-fold hoch priorisieren (loading=eager +
+       fetchpriority=high). Anzahl je Viewport-Breite: [abBreite, anzahl],
+       absteigend, die erste passende Stufe gilt. Auf grossen Monitoren viele,
+       auf Mobile (< 768) keine. Werte frei anpassbar; nur Seite 1. */
+    eagerStufen: [[1920, 26], [1440, 20], [1280, 14], [992, 10], [768, 6], [0, 0]]
   };
 
   var d = document;
@@ -228,6 +233,33 @@
   if (!seiten[1].length) seiten[1] = qsa(".w-dyn-item", itemsBox).map(bauItem);
   proSeite = seiten[1].length || 1;
 
+  /* Die ersten Bilder above-fold hoch priorisieren. Webflow gibt ALLEN Karten
+     loading="lazy" — auch der obersten Reihe (am Staging-HTML gezählt: 168 lazy,
+     1 eager). Lazy-Bilder bekommen in Chrome NIEDRIGE Netzwerkpriorität, genau
+     das kostet LCP. Die ersten N Karten (N je Viewport-Breite, CFG.eagerStufen)
+     bekommen loading="eager" + fetchpriority="high". So früh wie möglich (hier,
+     direkt beim Skript-Lauf, nicht erst bei DOMContentLoaded), damit der Browser
+     die Priorität noch vor dem Fetch sieht. Bewusst OHNE getBoundingClientRect:
+     das erzwänge ein Reflow, und das Raster-Layout muss hier noch nicht stehen —
+     die Stufen decken den sichtbaren Bereich je Breite ab. Nur Seite 1. */
+  (function priorisiereErste() {
+    var breite = window.innerWidth || d.documentElement.clientWidth || 0;
+    var anzahl = 0;
+    for (var s = 0; s < CFG.eagerStufen.length; s++) {
+      if (breite >= CFG.eagerStufen[s][0]) { anzahl = CFG.eagerStufen[s][1]; break; }
+    }
+    if (anzahl <= 0) return;
+    var n = 0;
+    for (var i = 0; i < seiten[1].length && n < anzahl; i++) {
+      var img = qs("img.cc-stock-tmb", seiten[1][i].el) || qs("img", seiten[1][i].el);
+      if (!img) continue;                        // z. B. reine Video-Karte
+      img.setAttribute("loading", "eager");
+      img.setAttribute("fetchpriority", "high");
+      n++;
+    }
+    if (n) log("Eager:", n, "Bilder priorisiert (Breite", breite + ")");
+  })();
+
   /* Seitenzahl + Parameter aus dem Markup lesen.
      Webflow rendert im Blätter-Bereich ein verstecktes Element
      <div class="w-page-count">1 / 31</div> (bzw. aria-label "Page 1 of 31").
@@ -349,8 +381,10 @@
     try { sessionStorage.setItem(schluessel, JSON.stringify({ n: n, t: Date.now() })); } catch (e) {}
   }
 
+  var ermittlungPromise = null;
   function gesamtErmitteln() {
     if (gesamtSicher || !pagParam) return Promise.resolve(gesamtSeiten);
+    if (ermittlungPromise) return ermittlungPromise;   // läuft bereits — nicht doppelt
     var gemerkt = ausSpeicher();
     if (gemerkt) { gesamtSeiten = gemerkt; gesamtSicher = true; return Promise.resolve(gesamtSeiten); }
 
@@ -377,14 +411,16 @@
         return binaer();
       });
     }
-    return hoch(2).then(binaer).then(function () {
+    ermittlungPromise = hoch(2).then(binaer).then(function () {
       gesamtSeiten = Math.max(1, lo);
       gesamtSicher = true;
       inSpeicher(gesamtSeiten);
       log("Seitenzahl ermittelt:", gesamtSeiten, "| geholte Seiten:", Object.keys(seiten).length);
       if (!istGefiltert()) paginationBauen(gesamtSeiten);
+      statusAktualisieren();          // „Ende"-Zustand jetzt mit sicherer Zahl neu bewerten
       return gesamtSeiten;
     });
+    return ermittlungPromise;
   }
 
   /* Katalog laden.
@@ -826,12 +862,19 @@
     if (laedt && !ladenGemeldet) return;
 
     var zustand = laedt ? "laden" : laufendeAnzahl === 0 ? "leer" : "treffer";
-    /* Solange noch nichts gezählt wurde, wird auch nichts behauptet: sonst
-       stünde beim allerersten Aufruf seite (1) >= laufendeSeiten (1) da und
-       „Ende der Liste" erschiene auf Seite 1 von 31.
-       Ungefiltert zählt immer die LEBENDE Seitenzahl: fehlt w-page-count,
-       wächst gesamtSeiten erst während der Sprungsuche auf den echten Wert. */
-    var seitenJetzt = istGefiltert() ? laufendeSeiten : Math.max(gesamtSeiten, 1);
+    /* „Ende" darf ungefiltert NUR gemeldet werden, wenn die Gesamtzahl der
+       Seiten wirklich FESTSTEHT. Sie steht fest, wenn w-page-count sie lieferte
+       (gesamtSicher) ODER wenn es gar keine Pagination gibt (kein pagParam →
+       es kann keine zweite Seite geben).
+       Steht sie NICHT fest — leeres/fehlendes w-page-count, und die Sprungsuche
+       ist noch nicht durch —, wissen wir NICHT, ob Seite 1 die letzte ist. Dann
+       niemals Ende annehmen (seitenJetzt = Infinity), sonst steht der „Ende der
+       Liste"-Button auf Seite 1 von 31 und die Nutzer denken, das war alles.
+       Das ist der Live-Fall: Webflow rendert w-page-count derzeit leer. */
+    var zahlSteht = gesamtSicher || !pagParam;
+    var seitenJetzt = istGefiltert()
+      ? laufendeSeiten
+      : (zahlSteht ? Math.max(gesamtSeiten, 1) : Infinity);
     var ende = zustand === "treffer" && laufendeAnzahl !== null && seite >= seitenJetzt;
 
     w.setAttribute("data-kl-liste", zustand);
@@ -1291,6 +1334,14 @@
       statusAktualisieren();
       paginationBauen(gesamtSeiten);
     }
+    /* Kam die Seitenzahl NICHT aus dem Markup (leeres/fehlendes w-page-count —
+       aktuell der LIVE-Zustand), die Sprungsuche FRÜH anstoßen, nicht erst im
+       Vorlade-Leerlauf nach load+800ms. Sonst fehlt die Pagination mehrere
+       Sekunden. Im kurzen Leerlauf, damit der erste Bildaufbau Vorrang behält;
+       memoisiert, läuft also nicht doppelt mit dem vorladen unten. Der
+       „Ende"-Zustand ist dank zahlSteht ohnehin schon korrekt (kein Ende, bis
+       die Zahl feststeht) — das hier holt nur die Pagination schneller. */
+    if (!gesamtSicher && pagParam) idle(gesamtErmitteln, 100);
     /* Katalog im HINTERGRUND vorladen, sobald die Seite fertig ist.
        Der erste Bildaufbau bleibt unangetastet (nichts davor), aber wer nach
        ein paar Sekunden filtert, bekommt das Ergebnis sofort — das ist der
@@ -1309,7 +1360,7 @@
   else start();
 
   window.klStock = {
-    version: "3.6.0",
+    version: "3.8.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
