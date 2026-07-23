@@ -5,7 +5,7 @@
  * Ersetzt vollständig:  attributes@2, attributes-cmsfilter@1, attributes-cmsload@1
  *                       + die drei eigenen Snippets (History-Blocker,
  *                         URL-Übernahme, Hover-Video)
- * Keine externe Abhängigkeit. Eine Datei, 17,7 KB (6,8 KB gzip).
+ * Keine externe Abhängigkeit. Eine Datei, ~22 KB (~8,3 KB gzip).
  *
  * WARUM EIGENER CODE STATT FINSWEET
  * Finsweet lädt für „Blättern + Filtern" beim Seitenaufruf ALLE CMS-Seiten
@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.8.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.0/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -177,6 +177,59 @@
   function endeMuster(t) { return new RegExp("[a-z0-9]{4,}" + esc(t) + "( |$)"); }
   function exaktMuster(t) { return new RegExp("(^| )" + esc(t) + "( |$)"); }
 
+  /* ── Füllwörter (Stoppwörter) ───────────────────────────────────
+     Wer „tomaten tauchen in wasser" tippt, soll dieselben Treffer wie
+     „tomaten tauchen wasser" bekommen. Alle Suchwörter müssen vorkommen
+     (siehe treffer()) — Artikel, Verhältnis- und Bindewörter stehen aber
+     in keinem Stock-Schlagwort und würden die Trefferzahl als Pflichtwort
+     auf null drücken. Sie fliegen VOR dem Vergleich raus. Anzeige-Text
+     (data-kl-text="suche") und URL bleiben unberührt: die lesen
+     angewandteSuche roh, nicht suchBegriffe().
+
+     BEWUSST NICHT in der Liste:
+     - Verneinung/Ausschluss (ohne, kein, nicht, without, no) — sie KEHREN
+       die Bedeutung um; „haus ohne menschen" dürfte nicht zu „haus menschen"
+       werden. Als Pflichtwort geben sie 0 Treffer + Vorschläge, das ist
+       ehrlicher als das Gegenteil zu zeigen.
+     - Zwiebelwörter, die in der jeweils anderen Sprache Inhalt sind:
+       „war" (Krieg), „man" (Mann), „will", „see" (der See!), „it" (IT).
+       Ihr stummes Streichen würde echte Suchen zerstören.
+     Alles in norm()-Form (klein, ä→ae, ö→oe, ü→ue). Liste bei Bedarf
+     ergänzbar. */
+  var FUELL = {
+    /* neutral in DE & EN — immer sicher */
+    in:1, im:1, an:1, am:1, auf:1, aus:1, bei:1, beim:1, mit:1, nach:1,
+    von:1, vom:1, zu:1, zum:1, zur:1, ueber:1, unter:1, vor:1, hinter:1,
+    neben:1, zwischen:1, durch:1, fuer:1, gegen:1, um:1, ins:1, ans:1, aufs:1,
+    und:1, oder:1, aber:1, sondern:1, sowie:1, denn:1,
+    als:1, wie:1, wenn:1, weil:1, dass:1, ob:1,
+    der:1, das:1, den:1, dem:1, des:1,
+    ein:1, eine:1, einen:1, einem:1, einer:1, eines:1,
+    ich:1, du:1, er:1, es:1, sie:1, wir:1, ihr:1,
+    mich:1, dich:1, sich:1, uns:1, euch:1,
+    dieser:1, diese:1, dieses:1, dies:1, hier:1, dort:1, dann:1,
+    /* DE Hilfsverben & Partikel — gegen den echten Katalog kollisionsgeprüft
+       (kein Treffer in Tags/Titel/Ort). Bewusst NICHT dabei: „waren" (=Waren),
+       „will", „war" (=Krieg) — das sind Inhaltswörter. */
+    ist:1, sind:1, hat:1, haben:1, wird:1, werden:1, wurde:1, wurden:1,
+    auch:1, noch:1, nur:1, schon:1, sehr:1, mehr:1,
+    /* Englisch */
+    the:1, and:1, or:1, but:1, nor:1, of:1, to:1, for:1, with:1, from:1, by:1,
+    into:1, onto:1, over:1, under:1, up:1, off:1, out:1, as:1, on:1, at:1,
+    is:1, are:1, was:1, were:1, be:1, been:1, being:1,
+    this:1, that:1, these:1, those:1, he:1, she:1, they:1, we:1, you:1,
+    your:1, our:1, my:1, here:1, there:1, then:1,
+    /* EN Verhältniswörter & Hilfsverben — ebenfalls kollisionsgeprüft.
+       „near" fehlt bewusst (kam im Katalog als Inhalt vor). */
+    around:1, above:1, below:1, behind:1, beside:1, between:1, during:1,
+    along:1, across:1, toward:1, towards:1, inside:1, outside:1, within:1,
+    has:1, have:1, had:1, its:1, also:1, just:1, than:1, too:1, about:1
+  };
+  /* „die" ist DE-Artikel, aber EN-Inhaltswort — nur strippen, wenn die
+     Seite nicht ausdrücklich englisch ist (deutsche Seite ist Standard). */
+  var SPRACHE = (d.documentElement.getAttribute("lang") || "").slice(0, 2).toLowerCase();
+  if (SPRACHE !== "en") FUELL.die = 1;
+
   /* ── Datenmodell ───────────────────────────────────────────────── */
   var seiten = {};            // Seitenzahl → Array von Item-Objekten
   var alleGeladen = false;    // wurden alle Seiten geholt?
@@ -225,7 +278,14 @@
     var zusatz = (roh.match(/[^\s]+-[^\s]+/g) || []).map(function (x) { return norm(x.replace(/-/g, "")); });
     var text = norm(roh + " " + massWorte(felder)) + (zusatz.length ? " " + zusatz.join(" ") : "");
     var flachT = flach(text);
-    return { el: el, felder: norm2, such: text, flach: flachT, flachstamm: stammText(flachT) };
+    /* Quelle für die „Meintest du …?"-Vorschläge: NUR Tags + Titel — die
+       kuratierten Felder. Die übrigen Suchfelder (Ort, Land, Kamera, Objektiv,
+       Kataloop-ID) sollen keine Vorschläge stellen: „berlin", „sony" oder eine
+       ID helfen bei einem Tippfehler nicht weiter. Fällt beides leer aus, wird
+       auf den vollen Suchtext zurückgegriffen, damit nie gar nichts vorschlägt. */
+    var vq = norm(((felder.tags || []).join(" ")) + " " + ((felder.title || []).join(" ")));
+    return { el: el, felder: norm2, such: text, vorschlag: vq || text,
+             flach: flachT, flachstamm: stammText(flachT) };
   }
 
   /* Seite 1 steht bereits im HTML (gut für SEO und den ersten Aufbau). */
@@ -514,9 +574,13 @@
 
   var angewandteSuche = "";        // was gerade tatsächlich gefiltert ist
   function suchBegriffe() {
-    return angewandteSuche
-      ? norm(angewandteSuche).split(" ").filter(function (w) { return w.length >= CFG.sucheMinZeichen; })
-      : [];
+    if (!angewandteSuche) return [];
+    var alle = norm(angewandteSuche).split(" ")
+      .filter(function (w) { return w.length >= CFG.sucheMinZeichen; });
+    var ohneFuell = alle.filter(function (w) { return !FUELL[w]; });
+    /* Nur entfernen, wenn ein sinntragendes Wort übrig bleibt — sonst würde
+       „the"/„und" allein plötzlich den ganzen Katalog zeigen statt nichts. */
+    return ohneFuell.length ? ohneFuell : alle;
   }
 
   function istGefiltert() {
@@ -583,8 +647,8 @@
   /* ── Gegenvorschläge ───────────────────────────────────────────
      Findet die Suche nichts, ist die beste Antwort ein Begriff, den es im
      Katalog WIRKLICH gibt. Dafür einmal ein Wortverzeichnis aus allen
-     geladenen Motiven bauen (Tags, Titel, Orte, Kamera …) und darin die
-     nächstliegenden Wörter suchen.
+     geladenen Motiven bauen — nur aus Tags + Titel (Feld `vorschlag`), nicht
+     aus Ort/Kamera/ID — und darin die nächstliegenden Wörter suchen.
 
      Gebaut wird es erst, wenn es gebraucht wird — also frühestens bei der
      ersten erfolglosen Suche. Und dann ist der Katalog garantiert
@@ -602,14 +666,14 @@
     for (var n in seiten) {
       if (!seiten.hasOwnProperty(n)) continue;
       for (var i = 0; i < seiten[n].length; i++) {
-        var worte = seiten[n][i].such.split(" ");
+        var worte = (seiten[n][i].vorschlag || seiten[n][i].such).split(" ");
         for (var j = 0; j < worte.length; j++) {
           var t = worte[j];
           /* Nur echte Wörter: mindestens vier Buchstaben, keine Ziffern.
-             Sonst landen Kataloop-IDs, Kameramodelle und die Pixelwörter
-             („50mp", „8k") im Verzeichnis — als Vorschlag hilft das niemandem,
-             und es bläht die Suche unnötig auf. Gesucht werden kann danach
-             weiterhin, das hier betrifft nur die Vorschläge. */
+             Die Quelle ist ohnehin schon auf Tags + Titel beschränkt; das hier
+             hält zusätzlich Zahl-Tags und sehr kurze Kürzel („4k", Jahreszahlen)
+             aus den Vorschlägen. Gesucht werden kann danach weiterhin, das hier
+             betrifft nur die Vorschläge. */
           if (t.length < 4 || !NUR_BUCHSTABEN.test(t)) continue;
           zaehl[t] = (zaehl[t] || 0) + 1;
         }
@@ -1360,7 +1424,7 @@
   else start();
 
   window.klStock = {
-    version: "3.8.0",
+    version: "3.9.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
