@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.1/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -400,10 +400,24 @@
 
   var hatWeiter = {};         // Seitenzahl → gibt es eine Folgeseite?
 
+  /* Nachgeladen wird IMMER über eine blanke URL: origin + pathname + Seitenzahl.
+     Bewusst NICHT location.href — das schleppte die aktuellen Parameter mit
+     (`?tags=koeln&…_page=2`). Cloudflare nimmt die komplette Query-String in
+     den Cache-Schlüssel, also erzeugte jeder neue Suchbegriff 31 URLs, die
+     noch nie jemand angefragt hatte: alle MISS, alle bis zum Webflow-Origin.
+     Gemessen auf Staging, eine Welle à 12 Seiten:
+       sauber (von allen Nutzern geteilt) →  0,28 s   [HIT]
+       mit Suchbegriff in der URL         →  4,19 s   [MISS]   ~15× langsamer
+     Einzelabruf: 0,08 s gegen 2,24 s. Auf 32 Seiten macht das ~1 s statt ~12 s.
+     Die Parameter dürfen weg, weil Webflow sie serverseitig ignoriert — an
+     tags, kategorie, typ, lizenz und ausrichtung geprüft, die Antwort ist
+     jeweils byte-identisch zur blanken Seite. Nur der Seiten-Parameter wirkt.
+     So kommen alle Nutzer und alle Suchen auf DIESELBEN 31 URLs, die damit
+     dauerhaft im CDN liegen. (Finsweet machte es genauso: origin + pathname.) */
   function seiteHolen(n) {
     if (seiten[n]) return Promise.resolve(seiten[n]);
     if (!pagParam) return Promise.resolve([]);
-    var u = new URL(location.href);
+    var u = new URL(location.pathname, location.origin);
     u.searchParams.set(pagParam, String(n));
     return fetch(u.toString(), { credentials: "same-origin" })
       .then(function (r) { return r.text(); })
@@ -1424,7 +1438,7 @@
   else start();
 
   window.klStock = {
-    version: "3.9.0",
+    version: "3.9.1",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,

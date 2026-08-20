@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 21,3 KB (8,1 KB gzip).
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.1/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.1/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -332,6 +332,7 @@ stehen — die Stufen decken den sichtbaren Bereich je Breite ab.
 | „foodfotografie" fand nichts | Bindestrich-Wörter werden zusätzlich zusammengezogen abgelegt (278 solcher Wörter in 500 Motiven) |
 | falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortkante (2) vor Grundform (1) |
 | „tomaten tauchen **in** wasser" fand weniger als ohne „in" (ab v3.9.0) | Füllwörter (Artikel, Verhältnis- & Bindewörter, DE **und** EN, ~150 Wörter) fliegen vor dem Vergleich raus, weil **alle** Suchwörter Pflicht sind und „in", „und", „the" … in keinem Schlagwort stehen. Anzeige-Text und URL bleiben unberührt. **Nicht** entfernt: Verneinung/Ausschluss (ohne, kein, without — sie kehren die Bedeutung um) und Zwiebelwörter, die anderssprachig Inhalt sind (war=Krieg, man=Mann, see=der See, boot, tag, hell, waren=Waren). „die" nur, wenn `<html lang>` ≠ `en`. Liste gegen den echten Katalog kollisionsgeprüft |
+| Deep-Link mit Suchbegriff lud quälend langsam (ab v3.9.1) | Nachgeladen wurde über `location.href` — die Parameter der aktuellen Suche wanderten in jede Abruf-URL (`?tags=koeln&…_page=2`). Cloudflare nimmt die ganze Query-String in den Cache-Schlüssel, also erzeugte **jeder neue Suchbegriff 31 fabrikneue URLs**: alle MISS, alle bis zum Origin. Jetzt wird immer `origin + pathname + Seitenzahl` geholt. Gemessen (Staging, eine Welle à 12 Seiten): **0,28 s statt 4,19 s**, Einzelabruf 0,08 s statt 2,24 s — auf 32 Seiten rund **1 s statt 12 s**. Die Parameter dürfen weg, weil Webflow sie serverseitig ignoriert (an tags, kategorie, typ, lizenz, ausrichtung geprüft: byte-identische Antwort). Genau so machte es auch Finsweet |
 | Gegenvorschläge schlugen Orte/Kameras/IDs vor (ab v3.9.0) | Das Wortverzeichnis für „Meintest du …?" wird jetzt **nur aus Tags + Titel** gebaut (Feld `vorschlag`), nicht mehr aus Ort/Land/Kamera/Objektiv/Kataloop-ID. Fällt beides leer, Rückfall auf den vollen Suchtext |
 | Blätter-Leiste sprang auf Seite 31 | gleitendes Fenster aus 5 Zahlen: `1 2 3 4 5 …`, bei Seite 5 dann `… 3 4 5 6 7 …` |
 | Aktiver Filter bleibt farblos | Die gelbe Optik hängt an `.stock-check-btn.fs-cmsfilter_active` — diese Klasse setzt das Skript jetzt selbst (zusätzlich `.kl-aktiv`), auch beim Laden aus der URL |
