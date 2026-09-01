@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 21,3 KB (8,1 KB gzip).
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.1/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.2/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.1/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.2/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -68,6 +68,7 @@ umbenennen willst — beide Schreibweisen funktionieren gleichzeitig:
 | `fs-cmsfilter-element="list"` | `data-kl-list` |
 | `fs-cmsfilter-element="filters"` | `data-kl-filters` |
 | `fs-cmsfilter-field="kategorie"` | `data-kl-field="kategorie"` |
+| `fs-cmsfilter-field="category"` (EN-Locale) | `data-kl-field="category"` |
 | `fs-cmsload-element="page-button"` | `data-kl-page-button` |
 | `fs-cmsload-element="page-dots"` | `data-kl-page-dots` |
 | `fs-cmsload-element="loader"` | `data-kl-loader` |
@@ -332,6 +333,9 @@ stehen — die Stufen decken den sichtbaren Bereich je Breite ab.
 | „foodfotografie" fand nichts | Bindestrich-Wörter werden zusätzlich zusammengezogen abgelegt (278 solcher Wörter in 500 Motiven) |
 | falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortkante (2) vor Grundform (1) |
 | „tomaten tauchen **in** wasser" fand weniger als ohne „in" (ab v3.9.0) | Füllwörter (Artikel, Verhältnis- & Bindewörter, DE **und** EN, ~150 Wörter) fliegen vor dem Vergleich raus, weil **alle** Suchwörter Pflicht sind und „in", „und", „the" … in keinem Schlagwort stehen. Anzeige-Text und URL bleiben unberührt. **Nicht** entfernt: Verneinung/Ausschluss (ohne, kein, without — sie kehren die Bedeutung um) und Zwiebelwörter, die anderssprachig Inhalt sind (war=Krieg, man=Mann, see=der See, boot, tag, hell, waren=Waren). „die" nur, wenn `<html lang>` ≠ `en`. Liste gegen den echten Katalog kollisionsgeprüft |
+| **Auf `/en` filterte gar nichts** (ab v3.9.2) | Webflow lokalisiert auch die **Feldnamen**: auf Englisch heissen die Filter `category`, `type`, `license`, `orientation` — und die Werte ebenso (`animals` statt `tiere`). `CFG.urlFelder` war seit v1.0.0 fest deutsch, also fand `aktiveFilter()` auf `/en` **0 Steuerungen** bei 246 vorhandenen `category`-Elementen; ein Klick auf einen Filter änderte weder Treffer noch URL. Finsweet las die Namen aus dem Markup und lief deshalb auf beiden Locales — beim Umbau ist das untergegangen. Jetzt wird der Feldsatz **aus dem DOM erkannt** (`FELD_SAETZE`), und zwar der mit den **meisten** Treffern: auf der deutschen Seite liegen 17 englische Streuelemente herum (545 zu 17), auf der englischen 0 deutsche (0 zu 552). Weitere Sprachen brauchen eine Zeile mehr |
+| Vorschlag führte trotzdem auf 0 Treffer (ab v3.9.2) | Das Wortverzeichnis für „Meintest du …?" wurde über den **ganzen** Katalog gebaut und kannte die angehakten Filter nicht. Belegter Fall: `?kategorie=tiere&tags=koelner` schlug „Koeln" vor — Koeln liegt in *staedte-gebaeude*, *filmfotografie* …, in *tiere* in **keinem einzigen** Motiv, der Klick landete wieder bei 0. Der Index wird jetzt nur aus Motiven gebaut, die die Filter passieren (Cache über `filterSchluessel()`, Neubau nur bei Filterwechsel) |
+| Leerzustand nannte die falsche Ursache (ab v3.9.2) | „koelner" ist **richtig geschrieben** und liefert ohne Filter 10 Treffer — trotzdem kamen Tippfehler-Korrekturen, als hätte man sich vertippt. Jetzt prüft das Skript erst `trefferOhneFilter()`: hat der Begriff ohne die Haken Treffer, erscheint **statt** der Tippfehler-Chips genau ein Chip „Ohne Filter (10)", der die Filter löst und den Begriff behält. Text über `CFG.ohneFilterText` (de/en, `%n` = Trefferzahl), Sprache nach `<html lang>`. Nutzt die vorhandene Chip-Vorlage — **keine Designer-Arbeit nötig** |
 | Deep-Link mit Suchbegriff lud quälend langsam (ab v3.9.1) | Nachgeladen wurde über `location.href` — die Parameter der aktuellen Suche wanderten in jede Abruf-URL (`?tags=koeln&…_page=2`). Cloudflare nimmt die ganze Query-String in den Cache-Schlüssel, also erzeugte **jeder neue Suchbegriff 31 fabrikneue URLs**: alle MISS, alle bis zum Origin. Jetzt wird immer `origin + pathname + Seitenzahl` geholt. Gemessen (Staging, eine Welle à 12 Seiten): **0,28 s statt 4,19 s**, Einzelabruf 0,08 s statt 2,24 s — auf 32 Seiten rund **1 s statt 12 s**. Die Parameter dürfen weg, weil Webflow sie serverseitig ignoriert (an tags, kategorie, typ, lizenz, ausrichtung geprüft: byte-identische Antwort). Genau so machte es auch Finsweet |
 | Gegenvorschläge schlugen Orte/Kameras/IDs vor (ab v3.9.0) | Das Wortverzeichnis für „Meintest du …?" wird jetzt **nur aus Tags + Titel** gebaut (Feld `vorschlag`), nicht mehr aus Ort/Land/Kamera/Objektiv/Kataloop-ID. Fällt beides leer, Rückfall auf den vollen Suchtext |
 | Blätter-Leiste sprang auf Seite 31 | gleitendes Fenster aus 5 Zahlen: `1 2 3 4 5 …`, bei Seite 5 dann `… 3 4 5 6 7 …` |

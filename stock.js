@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.1/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.2/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -74,6 +74,8 @@
 
   var CFG = {
     suchFeldId: "Search",          // Eingabefeld der Volltextsuche
+    /* Nur der Startwert — wird beim Start aus dem Markup ueberschrieben
+       (deutsche vs. englische Feldnamen, s. FELD_SAETZE). */
     urlFelder: ["kategorie", "typ", "lizenz", "ausrichtung"], // Filter, die in die URL dürfen
     suchParam: "tags",             // Suchbegriff ↔ ?tags=
     sucheMinZeichen: 2,            // ab so vielen Zeichen wird gesucht
@@ -90,6 +92,10 @@
     seitenAnfangId: "nav-top",     // Scrollziel für „Neue Suche starten"
     ladenAbMs: 250,                // so lange muss geladen werden, bis „laden" gemeldet wird
     vorschlaegeMax: 4,             // so viele Gegenvorschläge höchstens
+    /* Beschriftung des Chips, der bei „Begriff ok, Filter schliesst aus"
+       erscheint. %n wird durch die Trefferzahl ohne Filter ersetzt.
+       Sprache nach <html lang>. */
+    ohneFilterText: { de: "Ohne Filter (%n)", en: "Without filters (%n)" },
     blendenMs: 300,                // Ein-/Ausblenden der Status-Hüllen
     /* Die ersten Bilder above-fold hoch priorisieren (loading=eager +
        fetchpriority=high). Anzahl je Viewport-Breite: [abBreite, anzahl],
@@ -108,6 +114,37 @@
   if (!listWrap) return;                                  // keine Liste → nichts zu tun
   var itemsBox = qs(".w-dyn-items", listWrap) || listWrap;
   var filterForm = qs('[fs-cmsfilter-element="filters"], [data-kl-filters]');
+
+  /* ── Feldnamen je Sprache erkennen ──────────────────────────────
+     Webflow lokalisiert nicht nur die Inhalte, sondern auch die FELDNAMEN:
+     auf /en heissen die Filter category/type/license/orientation statt
+     kategorie/typ/lizenz/ausrichtung — und die WERTE ebenso (animals statt
+     tiere, photo statt foto). Finsweet las die Namen aus dem Markup und lief
+     deshalb auf beiden Locales; diese Engine hatte sie seit v1.0.0 fest
+     verdrahtet, wodurch auf /en NICHTS filterte (gemessen: 0 gefundene
+     Steuerungen gegen 246 vorhandene "category"-Elemente).
+
+     Erkannt wird am DOM, nicht an <html lang>: das Markup ist die Wahrheit.
+     Gewaehlt wird der Satz mit den MEISTEN Treffern, nicht der erste mit
+     irgendeinem — auf der englischen Seite liegt vereinzelt noch ein alter
+     deutscher Name herum (1x "kategorie" gegen 250x "category").
+     Weitere Sprachen brauchen nur eine Zeile mehr. */
+  var FELD_SAETZE = [
+    ["kategorie", "typ", "lizenz", "ausrichtung"],
+    ["category", "type", "license", "orientation"]
+  ];
+  (function feldnamenWaehlen() {
+    var besterSatz = FELD_SAETZE[0], beste = -1;
+    FELD_SAETZE.forEach(function (satz) {
+      var n = 0;
+      satz.forEach(function (f) {
+        n += qsa('[fs-cmsfilter-field="' + f + '"], [data-kl-field="' + f + '"]').length;
+      });
+      if (n > beste) { beste = n; besterSatz = satz; }
+    });
+    CFG.urlFelder = besterSatz;
+    log("Filterfelder:", besterSatz.join(", "), "(" + beste + " Elemente)");
+  })();
   var suchFeld = d.getElementById(CFG.suchFeldId);
   var loader = qs('[fs-cmsload-element="loader"], [data-kl-loader]');
   var dotsTmpl = qs('[fs-cmsload-element="page-dots"], [data-kl-page-dots]');
@@ -601,11 +638,10 @@
     return Object.keys(aktiveFilter()).length > 0 || suchBegriffe().length > 0;
   }
 
-  function treffer() {
-    var f = aktiveFilter(), felder = Object.keys(f), begriffe = suchBegriffe();
-    /* Muster EINMAL je Suche bauen, nicht je Motiv — bei 3.100 Einträgen
-       macht das den Unterschied zwischen flüssig und spürbar. */
-    var muster = begriffe.map(function (b) {
+  /* Muster EINMAL je Suche bauen, nicht je Motiv — bei 3.100 Einträgen
+     macht das den Unterschied zwischen flüssig und spürbar. */
+  function musterBauen(begriffe) {
+    return begriffe.map(function (b) {
       /* Drei Stufen, absteigend im Rang: (1) das Wort selbst, (2) Wortanfang
          mit mindestens 3 Zeichen Rest — das sind die Komposita, (3) Umlaute
          reduziert und Grundform, jeweils in BEIDE Richtungen verglichen
@@ -616,27 +652,45 @@
                fExakt: exaktMuster(fb), fAnfang: anfangMuster(fb), fEnde: endeMuster(fb),
                fStamm: exaktMuster(stamm(fb)) };
     });
+  }
 
+  /* Punkte eines Motivs für die ganze Frage — 0 heisst „passt nicht".
+     ALLE Suchwörter müssen vorkommen. */
+  function punkteFuer(it, muster) {
+    var summe = 0;
+    for (var k = 0; k < muster.length; k++) {
+      var m = muster[k], p = 0;
+      if (m.exakt.test(it.such)) p = 3;            // „blume" = Tag „Blume"
+      else if (m.anfang.test(it.such) || m.ende.test(it.such)) p = 2;  // Blumenstrauß, Bauernhaus
+      else if (m.fExakt.test(it.flach) || m.fAnfang.test(it.flach)
+            || m.fEnde.test(it.flach)) p = 2;      // „kuste" → Küste, Küstenlandschaft
+      else if (m.fExakt.test(it.flachstamm)        // Frage ist die Grundform des Wortes
+            || m.fStamm.test(it.flach)             // Grundform der Frage ist das Wort
+            || m.fStamm.test(it.flachstamm)) p = 1;   // beide auf Grundform gleich
+      if (!p) return 0;
+      summe += p;
+    }
+    return summe;
+  }
+
+  /* Filtergruppen sind UND-verknüpft, Werte innerhalb einer Gruppe ODER. */
+  function filterPasst(it, f, felder) {
+    for (var i = 0; i < felder.length; i++) {
+      var soll = f[felder[i]], hat = it.felder[felder[i]] || [], ok = false;
+      for (var j = 0; j < soll.length; j++) if (hat.indexOf(soll[j]) !== -1) { ok = true; break; }
+      if (!ok) return false;
+    }
+    return true;
+  }
+
+  function treffer() {
+    var f = aktiveFilter(), felder = Object.keys(f), begriffe = suchBegriffe();
+    var muster = musterBauen(begriffe);
     var liste = alleItems().filter(function (it) {
-      for (var i = 0; i < felder.length; i++) {
-        var soll = f[felder[i]], hat = it.felder[felder[i]] || [], ok = false;
-        for (var j = 0; j < soll.length; j++) if (hat.indexOf(soll[j]) !== -1) { ok = true; break; }
-        if (!ok) return false;                       // Filtergruppen sind UND-verknüpft
-      }
-      var punkte = 0;
-      for (var k = 0; k < muster.length; k++) {      // ALLE Suchwörter müssen vorkommen
-        var m = muster[k], p = 0;
-        if (m.exakt.test(it.such)) p = 3;            // „blume" = Tag „Blume"
-        else if (m.anfang.test(it.such) || m.ende.test(it.such)) p = 2;  // Blumenstrauß, Bauernhaus
-        else if (m.fExakt.test(it.flach) || m.fAnfang.test(it.flach)
-              || m.fEnde.test(it.flach)) p = 2;     // „kuste" → Küste, Küstenlandschaft
-        else if (m.fExakt.test(it.flachstamm)       // Frage ist die Grundform des Wortes
-              || m.fStamm.test(it.flach)            // Grundform der Frage ist das Wort
-              || m.fStamm.test(it.flachstamm)) p = 1;  // beide auf Grundform gleich
-        if (!p) return false;
-        punkte += p;
-      }
-      it.punkte = punkte;
+      if (!filterPasst(it, f, felder)) return false;
+      var p = punkteFuer(it, muster);
+      if (!p && muster.length) return false;
+      it.punkte = p;
       return true;
     });
 
@@ -644,6 +698,20 @@
        bei „Reis" der echte Reis oben und die Reise-Motive darunter. */
     if (begriffe.length) liste.sort(function (a, b) { return b.punkte - a.punkte; });
     return liste;
+  }
+
+  /* Wie viele Treffer haette die Suche OHNE die angehakten Filter?
+     Damit unterscheidet der Leerzustand zwei sehr verschiedene Faelle:
+     „den Begriff gibt es nicht" gegen „den Begriff gibt es, nur nicht in
+     dieser Kategorie". Belegter Fall: ?kategorie=tiere&tags=koelner ergab 0
+     und bot Tippfehler-Korrekturen an — dabei ist „koelner" richtig
+     geschrieben und liefert ohne den Filter 10 Treffer (Koelner Dom …). */
+  function trefferOhneFilter() {
+    var begriffe = suchBegriffe();
+    if (!begriffe.length) return 0;
+    var muster = musterBauen(begriffe), items = alleItems(), n = 0;
+    for (var i = 0; i < items.length; i++) if (punkteFuer(items[i], muster)) n++;
+    return n;
   }
 
   /* Einen Begriff anwenden — von der Tastatur wie von einem Vorschlags-Chip.
@@ -671,15 +739,33 @@
 
      Angenehmer Nebeneffekt: jeder Vorschlag stammt aus einem echten Motiv,
      kann also nie ins Leere führen. */
-  var wortIndex = null;
+  var wortIndex = null, wortIndexSchluessel = null;
   var NUR_BUCHSTABEN = /^[a-z]+$/;   // norm() hat Umlaute schon zu ae/oe/ue gemacht
 
+  /* Kennung der angehakten Filter — aendert sie sich, muss das Verzeichnis neu
+     gebaut werden (es enthaelt ja nur noch Woerter aus der Filtermenge). */
+  function filterSchluessel() {
+    var f = aktiveFilter();
+    return Object.keys(f).sort().map(function (k) {
+      return k + "=" + f[k].slice().sort().join("|");
+    }).join(";");
+  }
+
+  /* Das Verzeichnis enthaelt NUR Woerter aus Motiven, die die aktiven Filter
+     passieren. Ohne das schlug die Suche Begriffe vor, die es zwar im Katalog
+     gibt, in der gewaehlten Kategorie aber nicht — belegter Fall:
+     ?kategorie=tiere&tags=koelner schlug „Koeln" vor, und ein Klick darauf
+     fuehrte wieder auf 0 Treffer (Koeln liegt in staedte-gebaeude,
+     filmfotografie …, in tiere in keinem einzigen Motiv). Damit gilt die
+     Zusage weiter unten wieder: jeder Vorschlag liefert echte Treffer. */
   function wortIndexBauen() {
     var t0 = Date.now();
     var zaehl = Object.create(null);
+    var f = aktiveFilter(), felder = Object.keys(f);
     for (var n in seiten) {
       if (!seiten.hasOwnProperty(n)) continue;
       for (var i = 0; i < seiten[n].length; i++) {
+        if (felder.length && !filterPasst(seiten[n][i], f, felder)) continue;
         var worte = (seiten[n][i].vorschlag || seiten[n][i].such).split(" ");
         for (var j = 0; j < worte.length; j++) {
           var t = worte[j];
@@ -695,7 +781,8 @@
     }
     var liste = [];
     for (var wort in zaehl) liste.push([wort, zaehl[wort]]);
-    log("Wortverzeichnis:", liste.length, "Wörter in", Date.now() - t0, "ms");
+    log("Wortverzeichnis:", liste.length, "Wörter in", Date.now() - t0, "ms",
+        felder.length ? "(auf Filter eingeschränkt)" : "(ganzer Katalog)");
     return liste;
   }
 
@@ -725,7 +812,11 @@
     var tSuche = Date.now();
     var gesucht = suchBegriffe().filter(function (b) { return b.length >= 3; });
     if (!gesucht.length) return [];
-    if (!wortIndex) wortIndex = wortIndexBauen();
+    var schluessel = filterSchluessel();
+    if (!wortIndex || wortIndexSchluessel !== schluessel) {
+      wortIndex = wortIndexBauen();
+      wortIndexSchluessel = schluessel;
+    }
     if (!wortIndex.length) return [];
 
     var gefunden = Object.create(null);
@@ -789,7 +880,24 @@
     if (!vorschlagBox) return;
     qsa("[data-kl-vorschlag]", vorschlagBox).forEach(function (e) { e.remove(); });
 
-    var worte = vorschlagVorlage ? vorschlaegeFinden() : [];
+    /* Erst klaeren, WORAN es liegt. Hat der Begriff ohne die Haken Treffer,
+       ist er nicht falsch geschrieben — dann waeren Tippfehler-Vorschlaege
+       eine Luege („koelner" ist korrekt und bringt ohne Filter 10 Treffer).
+       In dem Fall gibt es genau einen Chip, der die Filter loest. */
+    var ohneFilter = Object.keys(aktiveFilter()).length ? trefferOhneFilter() : 0;
+    var filterIstSchuld = ohneFilter > 0;
+
+    if (filterIstSchuld && vorschlagVorlage) {
+      var vorlage = CFG.ohneFilterText[SPRACHE === "en" ? "en" : "de"];
+      var fChip = vorschlagVorlage.cloneNode(true);
+      fChip.setAttribute("data-kl-vorschlag", "");
+      (qs("[data-kl-vorschlag-text]", fChip) || fChip).textContent =
+        String(vorlage).replace("%n", String(ohneFilter));
+      fChip.addEventListener("click", function (e) { e.preventDefault(); filterLeeren(); });
+      vorschlagBox.appendChild(fChip);
+    }
+
+    var worte = (!filterIstSchuld && vorschlagVorlage) ? vorschlaegeFinden() : [];
     worte.forEach(function (wort) {
       var chip = vorschlagVorlage.cloneNode(true);
       chip.setAttribute("data-kl-vorschlag", "");
@@ -816,21 +924,23 @@
        gepflegten Chips. Das Label bleibt dabei außen vor — es wird gleich
        eigens geschaltet, sonst würde es wie feste Auswahl behandelt (also
        genau falsch herum: nur SICHTBAR ohne Vorschläge). */
+    var eigeneChips = worte.length + (filterIstSchuld ? 1 : 0);
     var festeChips = 0;
     Array.prototype.forEach.call(vorschlagBox.children, function (kind) {
       if (kind.hasAttribute("data-kl-vorschlag")) return;
       if (kind.hasAttribute("data-kl-vorschlag-label")) return;
-      kind.classList.toggle(CFG.verstecktKlasse, worte.length > 0);
+      kind.classList.toggle(CFG.verstecktKlasse, eigeneChips > 0);
       festeChips++;
     });
 
     /* Das „Probiere:"-Label steht über den Chips und verschwindet nur, wenn
        gar keine da sind — sichtbar bei echten Vorschlägen ODER fester Auswahl. */
-    var hatChips = worte.length > 0 || festeChips > 0;
+    var hatChips = eigeneChips > 0 || festeChips > 0;
     qsa("[data-kl-vorschlag-label]", vorschlagBox).forEach(function (label) {
       label.classList.toggle(CFG.verstecktKlasse, !hatChips);
     });
-    log("Vorschläge:", worte.length ? worte.join(", ") : "keine (feste Auswahl)");
+    log("Vorschläge:", filterIstSchuld ? "Filter ist schuld (" + ohneFilter + " ohne Filter)"
+        : worte.length ? worte.join(", ") : "keine (feste Auswahl)");
   }
 
   /* ── Zustand nach außen melden ─────────────────────────────────
@@ -1242,6 +1352,21 @@
     log("neue Suche");
   }
 
+  /* Nur die Haken loesen, den Suchbegriff behalten — fuer den Chip im
+     Leerzustand, wenn nicht der Begriff, sondern der Filter schuld ist. */
+  function filterLeeren() {
+    sperre = true;
+    CFG.urlFelder.forEach(function (feld) {
+      steuerungen(feld).forEach(function (s) { setzeBox(s, false); });
+    });
+    seite = 1;
+    sperre = false;
+    optikSync();
+    urlSchreiben();
+    zeichne(false);
+    log("Filter geloest, Suchbegriff behalten:", angewandteSuche);
+  }
+
   window.addEventListener("kl:neu-suchen", function () { neueSuche(); });
 
   var tippTimer = null;
@@ -1438,7 +1563,7 @@
   else start();
 
   window.klStock = {
-    version: "3.9.1",
+    version: "3.9.2",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
