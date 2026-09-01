@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 21,3 KB (8,1 KB gzip).
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.3/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.3/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -261,6 +261,26 @@ Zahl der Vorschläge: `CFG.vorschlaegeMax` (4).
 
 ---
 
+## Zwei Sprachen (ab v3.9.2 / v3.10.0)
+
+Webflow lokalisiert bei der Stock-Collection **drei** Dinge — das Skript muss alle drei kennen:
+
+| | Deutsch | Englisch |
+|---|---|---|
+| Feldnamen | `kategorie`, `typ`, `lizenz`, `ausrichtung` | `category`, `type`, `license`, `orientation` |
+| Filterwerte | `tiere`, `foto`, `hochformat` | `animals`, `photo`, `portrait` |
+| Motiv-Tags | „Sonnenuntergang, Wolken …" | „sunset, clouds …" |
+
+**Feldnamen** werden aus dem Markup erkannt (`FELD_SAETZE`), und zwar der Satz mit den **meisten** Treffern — auf der deutschen Seite liegen einzelne englische Streuelemente herum. Weitere Sprachen brauchen nur einen Eintrag mehr.
+
+**Filterwerte** stehen in `WERT_DE_EN` (23 Paare, siehe Kommentar dort). Bewusst fest hinterlegt statt aus der Reihenfolge abgeleitet — die Sortierung der Kategorie-Liste kann sich im Designer ändern.
+
+**Der Suchbegriff lässt sich nicht übersetzen.** Weil die Tags lokalisiert sind, findet `?tags=hund` auf der englischen Seite nichts. Er wird trotzdem mitgenommen, damit er sichtbar im Feld steht und korrigiert werden kann — `CFG.sucheBeimSprachwechsel: false` schaltet das ab, dann erscheint der ungefilterte Katalog.
+
+Umgeschrieben werden alle `.w-locales-item a[hreflang]`. Ein eigenes Element lässt sich mit `data-kl-sprachlink` zusätzlich anmelden; der ursprüngliche `href` wird beim ersten Mal in `data-kl-basis` gesichert.
+
+---
+
 ## Wann was geladen wird
 
 | Aktion | Kosten |
@@ -333,6 +353,7 @@ stehen — die Stufen decken den sichtbaren Bereich je Breite ab.
 | „foodfotografie" fand nichts | Bindestrich-Wörter werden zusätzlich zusammengezogen abgelegt (278 solcher Wörter in 500 Motiven) |
 | falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortkante (2) vor Grundform (1) |
 | „tomaten tauchen **in** wasser" fand weniger als ohne „in" (ab v3.9.0) | Füllwörter (Artikel, Verhältnis- & Bindewörter, DE **und** EN, ~150 Wörter) fliegen vor dem Vergleich raus, weil **alle** Suchwörter Pflicht sind und „in", „und", „the" … in keinem Schlagwort stehen. Anzeige-Text und URL bleiben unberührt. **Nicht** entfernt: Verneinung/Ausschluss (ohne, kein, without — sie kehren die Bedeutung um) und Zwiebelwörter, die anderssprachig Inhalt sind (war=Krieg, man=Mann, see=der See, boot, tag, hell, waren=Waren). „die" nur, wenn `<html lang>` ≠ `en`. Liste gegen den echten Katalog kollisionsgeprüft |
+| Sprachwechsel verwarf die ganze Auswahl (ab v3.10.0) | Webflows Umschalter rendert feste Links (`<a hreflang="en" href="/en/stock-photos-videos">`) — wer auf Deutsch nach Tieren filterte, landete auf Englisch im ungefilterten Katalog. Die Links werden jetzt bei jeder Änderung neu geschrieben, mit übersetzten **Feldnamen und Werten**: `?kategorie=tiere,zeitraffer&typ=video` → `?category=animals,timelapse&type=video`. Tabelle mit 23 Paaren, eindeutig in beide Richtungen; unbekannte Werte fallen weg statt einen kaputten Filter zu erzeugen. Die Seitenzahl bleibt bewusst weg (in der anderen Sprache startet man auf Seite 1) |
 | `?category=animals,` mit Komma am Ende (ab v3.9.3) | Auf der englischen Seite hängt `fs-cmsfilter-field` zusätzlich am textlosen Form-Label — **26 Träger auf 13 Kategorien, 13 davon leer** (auf Deutsch: 17 Träger, 0 leer). `aktiveFilter()` sammelte den Leerwert mit ein. Gefiltert wurde trotzdem korrekt (Werte einer Gruppe sind ODER-verknüpft), nur die URL war unsauber. `steuerungen()` verwirft leere Wert-Träger jetzt. Gefahrlos, weil beide Träger im selben Label liegen (13 Labels / 13 Checkboxen nachgezählt) |
 | **Auf `/en` filterte gar nichts** (ab v3.9.2) | Webflow lokalisiert auch die **Feldnamen**: auf Englisch heissen die Filter `category`, `type`, `license`, `orientation` — und die Werte ebenso (`animals` statt `tiere`). `CFG.urlFelder` war seit v1.0.0 fest deutsch, also fand `aktiveFilter()` auf `/en` **0 Steuerungen** bei 246 vorhandenen `category`-Elementen; ein Klick auf einen Filter änderte weder Treffer noch URL. Finsweet las die Namen aus dem Markup und lief deshalb auf beiden Locales — beim Umbau ist das untergegangen. Jetzt wird der Feldsatz **aus dem DOM erkannt** (`FELD_SAETZE`), und zwar der mit den **meisten** Treffern: auf der deutschen Seite liegen 17 englische Streuelemente herum (545 zu 17), auf der englischen 0 deutsche (0 zu 552). Weitere Sprachen brauchen eine Zeile mehr |
 | Vorschlag führte trotzdem auf 0 Treffer (ab v3.9.2) | Das Wortverzeichnis für „Meintest du …?" wurde über den **ganzen** Katalog gebaut und kannte die angehakten Filter nicht. Belegter Fall: `?kategorie=tiere&tags=koelner` schlug „Koeln" vor — Koeln liegt in *staedte-gebaeude*, *filmfotografie* …, in *tiere* in **keinem einzigen** Motiv, der Klick landete wieder bei 0. Der Index wird jetzt nur aus Motiven gebaut, die die Filter passieren (Cache über `filterSchluessel()`, Neubau nur bei Filterwechsel) |

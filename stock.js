@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.3/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.0/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -91,6 +91,7 @@
     verstecktKlasse: "u-d-none",   // Webflow-Klasse, mit der Status-Hüllen versteckt sind
     seitenAnfangId: "nav-top",     // Scrollziel für „Neue Suche starten"
     ladenAbMs: 250,                // so lange muss geladen werden, bis „laden" gemeldet wird
+    sucheBeimSprachwechsel: true,  // Suchbegriff in den Sprachumschalter-Link mitnehmen
     vorschlaegeMax: 4,             // so viele Gegenvorschläge höchstens
     /* Beschriftung des Chips, der bei „Begriff ok, Filter schliesst aus"
        erscheint. %n wird durch die Trefferzahl ohne Filter ersetzt.
@@ -129,22 +130,65 @@
      irgendeinem — auf der englischen Seite liegt vereinzelt noch ein alter
      deutscher Name herum (1x "kategorie" gegen 250x "category").
      Weitere Sprachen brauchen nur eine Zeile mehr. */
-  var FELD_SAETZE = [
-    ["kategorie", "typ", "lizenz", "ausrichtung"],
-    ["category", "type", "license", "orientation"]
-  ];
+  var FELD_SAETZE = {
+    de: ["kategorie", "typ", "lizenz", "ausrichtung"],
+    en: ["category", "type", "license", "orientation"]
+  };
+  var FELD_SPRACHE = "de";           // welcher Satz steht in DIESEM Markup?
   (function feldnamenWaehlen() {
-    var besterSatz = FELD_SAETZE[0], beste = -1;
-    FELD_SAETZE.forEach(function (satz) {
+    var beste = -1;
+    Object.keys(FELD_SAETZE).forEach(function (spr) {
       var n = 0;
-      satz.forEach(function (f) {
+      FELD_SAETZE[spr].forEach(function (f) {
         n += qsa('[fs-cmsfilter-field="' + f + '"], [data-kl-field="' + f + '"]').length;
       });
-      if (n > beste) { beste = n; besterSatz = satz; }
+      if (n > beste) { beste = n; FELD_SPRACHE = spr; }
     });
-    CFG.urlFelder = besterSatz;
-    log("Filterfelder:", besterSatz.join(", "), "(" + beste + " Elemente)");
+    CFG.urlFelder = FELD_SAETZE[FELD_SPRACHE];
+    log("Filterfelder:", FELD_SPRACHE, CFG.urlFelder.join(", "), "(" + beste + " Elemente)");
   })();
+
+  /* ── Filterwerte zwischen den Sprachen ──────────────────────────
+     Webflow lokalisiert auch die WERTE (tiere ↔ animals). Beim Wechsel der
+     Sprache soll die getroffene Auswahl erhalten bleiben, statt wie bisher
+     verloren zu gehen — der native Umschalter setzt feste Links ohne
+     Parameter.
+
+     Bewusst FEST hinterlegt statt aus der Reihenfolge abgeleitet: die
+     Kategorien stehen auf der Live-Seite zwar in beiden Sprachen gleich
+     sortiert, aber die Staging-Seite zeigt gerade, dass sich das mit einer
+     Designer-Aenderung verschiebt. Eine Tabelle ist langweilig und haelt.
+     Quelle: Topics-Collection (beide Locales) + die Filterlisten beider
+     Live-Seiten, 17 Kategorien plus die drei festen Filtergruppen.
+
+     Waechst die Collection, gehoert hier eine Zeile dazu; ein unbekannter
+     Wert faellt beim Wechsel einfach weg (und wird protokolliert), statt
+     einen kaputten Filter zu erzeugen. */
+  var WERT_DE_EN = {
+    filmfotografie: "film-photography", loop: "loop", zeitraffer: "timelapse",
+    cinemagraph: "cinemagraph", natur: "nature", tiere: "animals",
+    "staedte-gebaeude": "cities-buildings", luftaufnahme: "aerial-photography",
+    dinge: "things", "reisen-urlaub": "travel-vacation", arbeit: "work",
+    menschen: "people", studio: "studio", hintergrund: "background",
+    textur: "texture", "abstrakt-kreativ": "abstract-creative", symbolisch: "symbolic",
+    foto: "photo", video: "video",
+    kommerziell: "commercial", redaktionell: "editorial",
+    hochformat: "portrait", querformat: "landscape"
+  };
+  var WERT_EN_DE = (function () {
+    var r = {};
+    for (var k in WERT_DE_EN) if (WERT_DE_EN.hasOwnProperty(k)) r[WERT_DE_EN[k]] = k;
+    return r;
+  })();
+
+  function feldUebersetzen(feld, ziel) {
+    var i = FELD_SAETZE[FELD_SPRACHE].indexOf(feld);
+    return (i === -1 || !FELD_SAETZE[ziel]) ? null : FELD_SAETZE[ziel][i];
+  }
+  function wertUebersetzen(wert, ziel) {
+    var tab = ziel === "en" ? WERT_DE_EN : WERT_EN_DE;
+    return tab[wert] || null;
+  }
   var suchFeld = d.getElementById(CFG.suchFeldId);
   var loader = qs('[fs-cmsload-element="loader"], [data-kl-loader]');
   var dotsTmpl = qs('[fs-cmsload-element="page-dots"], [data-kl-page-dots]');
@@ -1305,6 +1349,23 @@
     sperre = false;
   }
 
+  /* Query selbst zusammenbauen, weil encodeURIComponent zwei Dinge unschoen
+     macht: Kommas werden zu %2C (in einer Query laut RFC 3986 erlaubt, also
+     zurueck zum Komma) und Leerzeichen zu %20 (als + viel lesbarer). Beides
+     ist beim Lesen unkritisch: gelesen wird mit URLSearchParams, und das
+     decodiert + laut Formular-Kodierung ohnehin als Leerzeichen. Ein
+     literales Plus im Suchbegriff bleibt %2B und wird nicht verwechselt.
+       ?kategorie=natur,tiere   statt  ?kategorie=natur%2Ctiere
+       ?tags=lorem+ipsum        statt  ?tags=lorem%20ipsum          */
+  function queryBauen(p) {
+    var teile = [];
+    p.forEach(function (v, k) {
+      teile.push(encodeURIComponent(k) + "=" +
+                 encodeURIComponent(v).replace(/%2C/gi, ",").replace(/%20/g, "+"));
+    });
+    return teile.join("&");
+  }
+
   function urlSchreiben() {
     if (sperre) return;
     var p = new URLSearchParams();
@@ -1314,21 +1375,61 @@
     });
     if (angewandteSuche) p.set(CFG.suchParam, angewandteSuche);
     if (seite > 1) p.set(pagParam, String(seite));
-    /* Selbst zusammenbauen, weil encodeURIComponent zwei Dinge unschoen macht:
-       Kommas werden zu %2C (in einer Query laut RFC 3986 erlaubt, also zurueck
-       zum Komma) und Leerzeichen zu %20 (als + viel lesbarer). Beides ist beim
-       Lesen unkritisch: das Skript liest die URL mit URLSearchParams, und das
-       decodiert + laut Formular-Kodierung ohnehin als Leerzeichen. Ein
-       literales Plus im Suchbegriff bleibt %2B und wird nicht verwechselt.
-         ?kategorie=natur,tiere   statt  ?kategorie=natur%2Ctiere
-         ?tags=lorem+ipsum        statt  ?tags=lorem%20ipsum          */
-    var teile = [];
-    p.forEach(function (v, k) {
-      teile.push(encodeURIComponent(k) + "=" +
-                 encodeURIComponent(v).replace(/%2C/gi, ",").replace(/%20/g, "+"));
-    });
-    var neu = location.pathname + (teile.length ? "?" + teile.join("&") : "") + location.hash;
+    var q = queryBauen(p);
+    var neu = location.pathname + (q ? "?" + q : "") + location.hash;
     if (neu !== location.pathname + location.search + location.hash) history.pushState({ kl: 1 }, "", neu);
+    sprachLinksAktualisieren();      // Umschalter traegt die Auswahl mit
+  }
+
+  /* ── Sprachumschalter: die Auswahl mitnehmen ────────────────────
+     Webflow rendert feste Links (<a hreflang="en" href="/en/stock-photos-videos">),
+     die Query faellt beim Wechsel also weg — wer auf Deutsch nach Tieren
+     filtert, landet auf Englisch im ungefilterten Katalog. Die Links werden
+     deshalb bei jeder Aenderung neu geschrieben, mit uebersetzten Feldnamen
+     UND Werten (kategorie=tiere → category=animals).
+
+     Das hreflang-Attribut sagt direkt, wohin der Link zielt — kein Raten am
+     Pfad. Der urspruengliche href wird beim ersten Mal in data-kl-basis
+     gesichert, damit wiederholtes Schreiben nicht auf sich selbst aufbaut.
+
+     Die Seitenzahl bleibt bewusst weg: in der anderen Sprache faengt man
+     sinnvollerweise auf Seite 1 an.
+
+     Der SUCHBEGRIFF laesst sich nicht uebersetzen — die Tags sind lokalisiert
+     ("Sonnenuntergang" gegen "sunset"), ein deutsches Wort findet auf der
+     englischen Seite also meist nichts. Er wird trotzdem mitgenommen
+     (CFG.sucheBeimSprachwechsel): so steht er sichtbar im Feld und kann
+     korrigiert werden, statt kommentarlos zu verschwinden. Auf false setzen,
+     wenn lieber der ungefilterte Katalog erscheinen soll. */
+  function sprachLinksAktualisieren() {
+    var links = qsa('.w-locales-item a[hreflang], [data-kl-sprachlink]');
+    if (!links.length) return;
+    var f = aktiveFilter(), verloren = [];
+    links.forEach(function (a) {
+      var ziel = (a.getAttribute("hreflang") || "").slice(0, 2).toLowerCase();
+      if (!FELD_SAETZE[ziel] || ziel === FELD_SPRACHE) return;
+      var basis = a.getAttribute("data-kl-basis");
+      if (basis === null) { basis = a.getAttribute("href") || ""; a.setAttribute("data-kl-basis", basis); }
+      var u;
+      try { u = new URL(basis, location.origin); } catch (e) { return; }
+      var p = new URLSearchParams();
+      CFG.urlFelder.forEach(function (feld) {
+        var werte = f[feld];
+        if (!werte || !werte.length) return;
+        var zielFeld = feldUebersetzen(feld, ziel);
+        if (!zielFeld) return;
+        var uebersetzt = [];
+        werte.forEach(function (w) {
+          var z = wertUebersetzen(w, ziel);
+          if (z) uebersetzt.push(z); else verloren.push(feld + "=" + w);
+        });
+        if (uebersetzt.length) p.set(zielFeld, uebersetzt.join(","));
+      });
+      if (CFG.sucheBeimSprachwechsel && angewandteSuche) p.set(CFG.suchParam, angewandteSuche);
+      var q = queryBauen(p);
+      a.setAttribute("href", u.pathname + (q ? "?" + q : ""));
+    });
+    if (verloren.length) log("Sprachwechsel: kein Gegenstueck fuer", verloren.join(", "));
   }
 
   /* ── Neue Suche starten ────────────────────────────────────────
@@ -1534,6 +1635,7 @@
     vorschlaegeVorbereiten();          // muss VOR dem ersten Rendern laufen
     ladeAnzeige(false);
     urlLesen();
+    sprachLinksAktualisieren();        // beim ersten Laden: urlSchreiben() laeuft hier noch nicht
     videosBinden(d);
     /* Nur neu rendern, wenn die URL etwas verlangt — sonst bleibt das
        server-gerenderte Seite-1-Markup unangetastet stehen (schnellster Start). */
@@ -1574,7 +1676,7 @@
   else start();
 
   window.klStock = {
-    version: "3.9.3",
+    version: "3.10.0",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
