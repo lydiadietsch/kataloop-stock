@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.2/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.9.3/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -610,7 +610,18 @@
         return input ? { input: input, label: label,
                          wert: (w.textContent || "").trim().toLowerCase(),
                          text: (w.textContent || "").trim() } : null;
-      }).filter(Boolean);
+      /* Leere Wert-Träger verwerfen. Auf der englischen Seite hängt
+         fs-cmsfilter-field zusätzlich am (textlosen) Form-Label, also zweimal
+         je Checkbox: 26 Träger auf 13 Kategorien, 13 davon leer. aktiveFilter()
+         sammelte den Leerwert mit ein und schrieb "?category=animals," — mit
+         Komma am Ende. Gefiltert wurde trotzdem richtig (die Werte einer
+         Gruppe sind ODER-verknüpft), nur die URL war unsauber. Auf der
+         deutschen Seite gibt es das Muster nicht (17 Träger, 0 leer).
+         Verwerfen ist gefahrlos: beide Träger liegen im SELBEN Label, die
+         Checkbox bleibt über ihren Wert-Träger erreichbar — an 13 Labels /
+         13 Checkboxen nachgezählt. Ein leerer Wert könnte ohnehin nie
+         treffen, denn feldWerte() legt leere Feldwerte gar nicht erst ab. */
+      }).filter(function (s) { return s && s.wert; });
   }
 
   function aktiveFilter() {
@@ -1563,7 +1574,7 @@
   else start();
 
   window.klStock = {
-    version: "3.9.2",
+    version: "3.9.3",
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
