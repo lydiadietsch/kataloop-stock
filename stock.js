@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.1/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.2/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -105,7 +105,7 @@
     eagerStufen: [[1920, 26], [1440, 20], [1280, 14], [992, 10], [768, 6], [0, 0]]
   };
 
-  var VERSION = "3.10.1";
+  var VERSION = "3.10.2";
   var d = document;
   var qs = function (s, r) { return (r || d).querySelector(s); };
   var qsa = function (s, r) { return Array.prototype.slice.call((r || d).querySelectorAll(s)); };
@@ -1289,7 +1289,16 @@
       });
       return;
     }
-    var zeichneTreffer = function () {
+    /* `erzwingen` nur beim Abschluss. Zwischenstände bleiben gesperrt, solange
+       die Ladephase läuft und die Maske noch NICHT steht: ladeAnzeige(true)
+       startet bloß den 250-ms-Timer (CFG.ladenAbMs), meldet "laden" also erst
+       später — ein Zeichnen davor liess die Teiltreffer kurz aufblitzen, und
+       die Maske legte sich erst DANACH darüber. Genau dieser Blitzer.
+       Jetzt gilt: unter 250 ms gar keine Maske und genau ein sauberer Sprung;
+       dauert es länger, bleibt bis zur Maske die alte Liste stehen und alle
+       Wellen zeichnen darunter. */
+    var zeichneTreffer = function (erzwingen) {
+      if (!erzwingen && laedt && !ladenGemeldet) return;
       var t = treffer();
       var seitenZahl = Math.max(1, Math.ceil(t.length / proSeite));
       if (seite > seitenZahl) seite = 1;
@@ -1305,9 +1314,9 @@
       return;
     }
     ladeAnzeige(true);                     // SOFORT sichtbar, vor dem ersten Abruf
-    zeichneTreffer();                      // zeigt schon, was bereits geladen ist
+    zeichneTreffer();                      // greift nur noch, wenn keine Maske kommt
     alleHolen(zeichneTreffer).then(function () {
-      zeichneTreffer();
+      zeichneTreffer(true);                // Abschluss zeichnet IMMER
       ladeAnzeige(false);                  // MUSS in jedem Fall aus (war der Hänger)
       if (scrollen) nachObenScrollen();
     }, function () { ladeAnzeige(false); });

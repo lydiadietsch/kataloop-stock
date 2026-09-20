@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 21,3 KB (8,1 KB gzip).
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.1/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.2/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.1/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.2/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -354,6 +354,7 @@ stehen — die Stufen decken den sichtbaren Bereich je Breite ab.
 | „foodfotografie" fand nichts | Bindestrich-Wörter werden zusätzlich zusammengezogen abgelegt (278 solcher Wörter in 500 Motiven) |
 | falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortkante (2) vor Grundform (1) |
 | „tomaten tauchen **in** wasser" fand weniger als ohne „in" (ab v3.9.0) | Füllwörter (Artikel, Verhältnis- & Bindewörter, DE **und** EN, ~150 Wörter) fliegen vor dem Vergleich raus, weil **alle** Suchwörter Pflicht sind und „in", „und", „the" … in keinem Schlagwort stehen. Anzeige-Text und URL bleiben unberührt. **Nicht** entfernt: Verneinung/Ausschluss (ohne, kein, without — sie kehren die Bedeutung um) und Zwiebelwörter, die anderssprachig Inhalt sind (war=Krieg, man=Mann, see=der See, boot, tag, hell, waren=Waren). „die" nur, wenn `<html lang>` ≠ `en`. Liste gegen den echten Katalog kollisionsgeprüft |
+| Beim Filtern blitzten Treffer auf, DANACH kam die Ladeanzeige (ab v3.10.2) | `zeichne()` rief `zeichneTreffer()` sofort auf, `ladeAnzeige(true)` startete aber nur den 250-ms-Timer (`CFG.ladenAbMs`) — die Maske kam also **nach** den Teiltreffern. Jetzt sind Zwischenstände gesperrt, solange geladen wird und die Maske noch nicht steht; nur der Abschluss zeichnet erzwungen. Unter 250 ms: keine Maske, ein sauberer Sprung. Länger: bis zur Maske bleibt die alte Liste stehen, die Wellen zeichnen darunter. Tritt nur auf, wenn vor Abschluss des Vorladens gefiltert wird — danach greift der Sofort-Pfad ohne Maske |
 | Einzelseiten brauchten ein eigenes Hover-Snippet (ab v3.10.1) | `stock.js` stieg ohne Collection-Liste sofort aus (`if (!listWrap) return`) — auf `/stockfotos-videos/[slug]` gibt es zwar 3 Listen mit Hover-Videos, aber keine ist als Stock-Liste getaggt. Deshalb lag dort ein eigenes Footer-Snippet, das **nur Hover** konnte: keine Mittig-im-Bild-Automatik auf Touch (ein angetipptes Video hielt nie wieder an, weil es nur auf `mouseleave` stoppte), kein faules Metadaten-Laden (`preload="metadata"` für alle Videos sofort) und kein `prefers-reduced-motion`. Die Video-Sektion steht jetzt **vor** dem Ausstieg, und ohne Liste wird nur sie gebunden. Das Snippet kann ersatzlos raus |
 | Sprachwechsel verwarf die ganze Auswahl (ab v3.10.0) | Webflows Umschalter rendert feste Links (`<a hreflang="en" href="/en/stock-photos-videos">`) — wer auf Deutsch nach Tieren filterte, landete auf Englisch im ungefilterten Katalog. Die Links werden jetzt bei jeder Änderung neu geschrieben, mit übersetzten **Feldnamen und Werten**: `?kategorie=tiere,zeitraffer&typ=video` → `?category=animals,timelapse&type=video`. Tabelle mit 23 Paaren, eindeutig in beide Richtungen; unbekannte Werte fallen weg statt einen kaputten Filter zu erzeugen. Die Seitenzahl bleibt bewusst weg (in der anderen Sprache startet man auf Seite 1) |
 | `?category=animals,` mit Komma am Ende (ab v3.9.3) | Auf der englischen Seite hängt `fs-cmsfilter-field` zusätzlich am textlosen Form-Label — **26 Träger auf 13 Kategorien, 13 davon leer** (auf Deutsch: 17 Träger, 0 leer). `aktiveFilter()` sammelte den Leerwert mit ein. Gefiltert wurde trotzdem korrekt (Werte einer Gruppe sind ODER-verknüpft), nur die URL war unsauber. `steuerungen()` verwirft leere Wert-Träger jetzt. Gefahrlos, weil beide Träger im selben Label liegen (13 Labels / 13 Checkboxen nachgezählt) |
