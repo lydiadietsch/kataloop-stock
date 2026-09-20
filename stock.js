@@ -63,7 +63,7 @@
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.1/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -105,14 +105,109 @@
     eagerStufen: [[1920, 26], [1440, 20], [1280, 14], [992, 10], [768, 6], [0, 0]]
   };
 
+  var VERSION = "3.10.1";
   var d = document;
   var qs = function (s, r) { return (r || d).querySelector(s); };
   var qsa = function (s, r) { return Array.prototype.slice.call((r || d).querySelectorAll(s)); };
   var log = function () { if (window.__klStockDebug) console.log.apply(console, ["[kl-stock]"].concat([].slice.call(arguments))); };
 
+  /* ── Hover-Video ───────────────────────────────────────────────── */
+  var beruehrung = !window.matchMedia("(hover: hover)").matches;
+  var wenigerBewegung = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var datenSparen = !!(navigator.connection && navigator.connection.saveData);
+
+  var metaBeobachter = "IntersectionObserver" in window ? new IntersectionObserver(function (es) {
+    es.forEach(function (e) {
+      if (!e.isIntersecting) return;
+      if (e.target.preload !== "metadata") e.target.preload = "metadata";
+      metaBeobachter.unobserve(e.target);
+    });
+  }, { rootMargin: CFG.videoVorladen }) : null;
+
+  function abspielen(v) {
+    var los = function () {
+      var p = v.play();
+      if (p && p.catch) p.catch(function () {
+        v.muted = true; v.setAttribute("muted", "");
+        var n = v.play(); if (n && n.catch) n.catch(function () {});
+      });
+    };
+    if (v.readyState >= 2) return los();
+    v.addEventListener("canplay", function once() { v.removeEventListener("canplay", once); los(); }, { once: true });
+    if (v.preload === "none") v.preload = "metadata";
+    if (v.readyState < 2) v.load();
+  }
+  function anhalten(v) { try { v.pause(); v.currentTime = 0; } catch (e) {} }
+
+  function videosBinden(scope) {
+    qsa(".u-link-cover", scope || d).forEach(function (link) {
+      if (link.dataset.klHover) return;
+      link.dataset.klHover = "1";
+      var card = link.closest(".card");
+      var v = card && qs(".hover-video", card);
+      if (!v) return;
+      v.muted = true;
+      v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); v.setAttribute("webkit-playsinline", "");
+      v.removeAttribute("controls");
+      if (metaBeobachter && !datenSparen) { v.preload = "none"; metaBeobachter.observe(v); }
+      else v.preload = "metadata";
+      if (wenigerBewegung || beruehrung) return;
+      link.addEventListener("mouseenter", function () { abspielen(v); });
+      link.addEventListener("mouseleave", function () { anhalten(v); });
+      link.addEventListener("focusin", function () { abspielen(v); });
+      link.addEventListener("focusout", function () { anhalten(v); });
+    });
+    if (beruehrung) mobileBinden(scope);
+  }
+
+  /* Mobile: das Video der Karte spielt, die gerade mittig im Bild steht. */
+  var mobilBeobachter = null, mobilAktuell = null;
+  function mobileBinden(scope) {
+    if (wenigerBewegung || datenSparen || !("IntersectionObserver" in window)) return;
+    if (!mobilBeobachter) {
+      mobilBeobachter = new IntersectionObserver(mobileWaehlen, { threshold: [0, 0.35, 0.6, 0.9], rootMargin: "-15% 0px -15% 0px" });
+    }
+    qsa(".hover-video", scope || d).forEach(function (v) {
+      if (v.dataset.klMobil) return;
+      v.dataset.klMobil = "1";
+      mobilBeobachter.observe(v);
+    });
+  }
+  function mobileWaehlen() {
+    var mitte = window.innerHeight / 2, best = null, nah = Infinity;
+    qsa(".hover-video").forEach(function (v) {
+      var r = v.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight) return;
+      var sicht = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
+      if (sicht < r.height * 0.5) return;
+      var dist = Math.abs((r.top + r.bottom) / 2 - mitte);
+      if (dist < nah) { nah = dist; best = v; }
+    });
+    if (best === mobilAktuell) return;
+    if (mobilAktuell) anhalten(mobilAktuell);
+    mobilAktuell = best;
+    if (best) abspielen(best);
+  }
+
   /* ── Grundelemente ─────────────────────────────────────────────── */
   var listWrap = qs('[fs-cmsfilter-element="list"], [fs-cmsload-element="list"], [data-kl-list]');
-  if (!listWrap) return;                                  // keine Liste → nichts zu tun
+  /* Ohne Collection-Liste gibt es nichts zu filtern, zu blaettern und zu
+     suchen — Hover-Videos gibt es aber trotzdem. Die Einzelseiten zeigen
+     verwandte Motive in eigenen Listen, die nicht als Stock-Liste getaggt
+     sind; frueher stieg das Skript hier komplett aus, weshalb dort ein
+     eigenes Snippet im Footer noetig war. Das konnte nur Hover — nicht die
+     Mittig-im-Bild-Automatik auf Touch, nicht das faule Metadaten-Laden und
+     nicht prefers-reduced-motion. Seit v3.10.1 wird die Video-Logik auch
+     ohne Liste gebunden und alles Uebrige uebersprungen; das Snippet kann
+     ersatzlos weg. Deshalb steht die Video-Sektion oben: sie darf nicht
+     hinter diesem return liegen. */
+  if (!listWrap) {
+    var nurVideos = function () { videosBinden(d); log("keine Liste — nur Video-Logik gebunden"); };
+    if (d.readyState === "loading") d.addEventListener("DOMContentLoaded", nurVideos);
+    else nurVideos();
+    window.klStock = { version: VERSION, nurVideo: true, videosBinden: videosBinden };
+    return;
+  }
   var itemsBox = qs(".w-dyn-items", listWrap) || listWrap;
   var filterForm = qs('[fs-cmsfilter-element="filters"], [data-kl-filters]');
 
@@ -1552,84 +1647,6 @@
 
   window.addEventListener("popstate", function () { urlLesen(); zeichne(false); });
 
-  /* ── Hover-Video ───────────────────────────────────────────────── */
-  var beruehrung = !window.matchMedia("(hover: hover)").matches;
-  var wenigerBewegung = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var datenSparen = !!(navigator.connection && navigator.connection.saveData);
-
-  var metaBeobachter = "IntersectionObserver" in window ? new IntersectionObserver(function (es) {
-    es.forEach(function (e) {
-      if (!e.isIntersecting) return;
-      if (e.target.preload !== "metadata") e.target.preload = "metadata";
-      metaBeobachter.unobserve(e.target);
-    });
-  }, { rootMargin: CFG.videoVorladen }) : null;
-
-  function abspielen(v) {
-    var los = function () {
-      var p = v.play();
-      if (p && p.catch) p.catch(function () {
-        v.muted = true; v.setAttribute("muted", "");
-        var n = v.play(); if (n && n.catch) n.catch(function () {});
-      });
-    };
-    if (v.readyState >= 2) return los();
-    v.addEventListener("canplay", function once() { v.removeEventListener("canplay", once); los(); }, { once: true });
-    if (v.preload === "none") v.preload = "metadata";
-    if (v.readyState < 2) v.load();
-  }
-  function anhalten(v) { try { v.pause(); v.currentTime = 0; } catch (e) {} }
-
-  function videosBinden(scope) {
-    qsa(".u-link-cover", scope || d).forEach(function (link) {
-      if (link.dataset.klHover) return;
-      link.dataset.klHover = "1";
-      var card = link.closest(".card");
-      var v = card && qs(".hover-video", card);
-      if (!v) return;
-      v.muted = true;
-      v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); v.setAttribute("webkit-playsinline", "");
-      v.removeAttribute("controls");
-      if (metaBeobachter && !datenSparen) { v.preload = "none"; metaBeobachter.observe(v); }
-      else v.preload = "metadata";
-      if (wenigerBewegung || beruehrung) return;
-      link.addEventListener("mouseenter", function () { abspielen(v); });
-      link.addEventListener("mouseleave", function () { anhalten(v); });
-      link.addEventListener("focusin", function () { abspielen(v); });
-      link.addEventListener("focusout", function () { anhalten(v); });
-    });
-    if (beruehrung) mobileBinden(scope);
-  }
-
-  /* Mobile: das Video der Karte spielt, die gerade mittig im Bild steht. */
-  var mobilBeobachter = null, mobilAktuell = null;
-  function mobileBinden(scope) {
-    if (wenigerBewegung || datenSparen || !("IntersectionObserver" in window)) return;
-    if (!mobilBeobachter) {
-      mobilBeobachter = new IntersectionObserver(mobileWaehlen, { threshold: [0, 0.35, 0.6, 0.9], rootMargin: "-15% 0px -15% 0px" });
-    }
-    qsa(".hover-video", scope || d).forEach(function (v) {
-      if (v.dataset.klMobil) return;
-      v.dataset.klMobil = "1";
-      mobilBeobachter.observe(v);
-    });
-  }
-  function mobileWaehlen() {
-    var mitte = window.innerHeight / 2, best = null, nah = Infinity;
-    qsa(".hover-video").forEach(function (v) {
-      var r = v.getBoundingClientRect();
-      if (r.bottom < 0 || r.top > window.innerHeight) return;
-      var sicht = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
-      if (sicht < r.height * 0.5) return;
-      var dist = Math.abs((r.top + r.bottom) / 2 - mitte);
-      if (dist < nah) { nah = dist; best = v; }
-    });
-    if (best === mobilAktuell) return;
-    if (mobilAktuell) anhalten(mobilAktuell);
-    mobilAktuell = best;
-    if (best) abspielen(best);
-  }
-
   /* ── Start ─────────────────────────────────────────────────────── */
   function start() {
     vorschlaegeVorbereiten();          // muss VOR dem ersten Rendern laufen
@@ -1676,7 +1693,7 @@
   else start();
 
   window.klStock = {
-    version: "3.10.0",
+    version: VERSION,
     zustand: function () {
       return {
         seite: seite, gesamtSeiten: gesamtSeiten, proSeite: proSeite,
