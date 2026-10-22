@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 21,3 KB (8,1 KB gzip).
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.2/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.11.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.2/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.11.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -111,6 +111,9 @@ jeweiligen Abschnitten unten.
 | `data-kl-text="suche"` | wird mit dem Suchbegriff befüllt |
 | `data-kl-text="anzahl"` | Trefferzahl (nur wenn sie feststeht) |
 | `data-kl-text="auswahl"` | Suchbegriff + Filter, lesbar |
+| `data-kl-zeigen="korrektur"` | Hinweis „Ergebnisse für …" bei Tippfehler-Korrektur (ab v3.11.0, s. u.) |
+| `data-kl-text="korrektur"` | wird mit dem korrigierten Suchtext befüllt |
+| `data-kl-original` | Link „Stattdessen nach … suchen" — zeigt die Suche ohne Korrektur |
 
 **Gegenvorschläge — in der Leer-Hülle:**
 
@@ -208,7 +211,8 @@ wirklich gibt** — ein Vorschlag kann also nie ins Leere führen.
 
 Gefunden wird über ein Wortverzeichnis aus allen geladenen Motiven (Tags,
 Titel, Orte, Kamera). Gesucht wird in dieser Rangfolge: Wortanfang, dann die
-Umlaut-Variante, dann Tippfehler nach Levenshtein — bei Wörtern bis fünf
+Umlaut-Variante, dann Tippfehler nach Editierabstand (zwei vertauschte
+Nachbarbuchstaben zählen seit v3.11.0 als **ein** Fehler) — bei Wörtern bis fünf
 Zeichen ein Fehler, darüber zwei (bei kurzen Wörtern wäre „hund" sonst
 plötzlich „mund", „rund", „bund"). Bei Gleichstand gewinnt das häufigere Wort.
 
@@ -259,6 +263,62 @@ behandelt und stünde genau falsch herum da (nur ohne Vorschläge).
 ```
 
 Zahl der Vorschläge: `CFG.vorschlaegeMax` (4).
+
+---
+
+## Tippfehler-Korrektur (ab v3.11.0)
+
+„yoshua tree" fand nichts und bot nur den Chip „Joshua" an. Jetzt sucht das
+Skript gleich korrigiert und sagt das an:
+
+> Ergebnisse für „**Joshua tree**" · [Stattdessen nach „yoshua tree" suchen]
+
+**Regeln** (am Katalog geprüft, 3.535 Motive, DE und EN):
+
+- Korrigiert wird nur ein Wort, das im **ganzen Katalog** nichts findet. Ein
+  Wort mit Treffern bleibt unangetastet. Ständige Toleranz („1 Buchstabe falsch
+  ist ok") verbietet sich: 86 % der 4-Buchstaben-Wörter im Katalog haben einen
+  Nachbarn mit nur einem Buchstaben Unterschied — Baum/Raum, rosa/Rost,
+  Himmel/Hummel, light/night, weather/feather.
+- Ab 4 Buchstaben 1 Fehler, ab 8 Buchstaben 2 (`CFG.korrekturAb`,
+  `CFG.korrekturZweiAb` — dieselben Schwellen wie Algolias Standard).
+  Vertauschte Nachbarbuchstaben („hosue") zählen als ein Fehler.
+- Gewinner ist das Katalogwort mit dem kleinsten Abstand, bei Gleichstand das
+  häufigste. Vokabular ist der volle Suchtext ohne Filter, also auch Orte
+  („mallorka" → Mallorca).
+- Eine J=Y-Regel o. Ä. braucht es nicht: Yoshua→Joshua ist ein Buchstabe.
+  Lautregeln (ph=f, c=k …) hätten im Test nur Wörter gerettet, die es im
+  Katalog gar nicht gibt (Ketchup, Spaghetti, Joghurt).
+- Gezeigt wird das Wort, wie es im Katalog steht („Küste", nicht „kueste").
+  Suchfeld und URL behalten, was getippt wurde.
+- Erst nach vollständigem Katalog — ob ein Wort „nirgends" vorkommt, lässt sich
+  vorher nicht sagen. Während des Ladens liegt ohnehin die Maske darüber.
+
+**Messwerte:** an simulierten Tippfehlern (Tastatur-Nachbarn, fehlende,
+doppelte, vertauschte Buchstaben) findet die Korrektur das richtige Wort in
+100 % (DE) bzw. 99 % (EN) der Fälle, an erster Stelle in 97 % bzw. 94 %.
+Kehrseite: ein **korrekt** geschriebenes Wort, das es im Katalog nicht gibt,
+kann umgebogen werden — Arzt→Art, Ratte→Matte, mouse→house, shark→sharp
+(2 von 119 bzw. 3 von 115 Alltagswörtern). Deshalb ist der Hinweis Pflicht:
+
+```html
+<div data-kl-zeigen="korrektur" class="u-pb-1 u-d-none">
+  <div class="paragraph-xs u-text-white u-weight400">
+    Ergebnisse für „<span data-kl-text="korrektur" class="u-text-yellow200">Joshua tree</span>"
+    · <a href="#" data-kl-original class="u-text-link">Stattdessen nach „<span data-kl-text="suche">Yoshua tree</span>" suchen</a>
+  </div>
+</div>
+```
+
+**Ohne** `[data-kl-zeigen="korrektur"]` auf der Seite wird gar nicht
+korrigiert — dann bleibt es beim Leerzustand mit Vorschlägen. Der Hinweis
+erscheint nur zusammen mit Treffern; bringt auch die Korrektur nichts, kommt
+der Leerzustand. Mit Filtern: „yoshua tree" in „Tiere" ergibt den Chip
+„Ohne Filter (2)", ein Klick zeigt die korrigierten Treffer samt Hinweis.
+
+Der Link „Stattdessen …" schaltet die Korrektur für **diese** Suche ab
+(Leerzustand mit Vorschlägen); sobald weitergetippt wird, korrigiert sie wieder.
+Der korrigierte Text steht zusätzlich als `data-kl-korrektur` am `<html>`.
 
 ---
 
@@ -354,6 +414,7 @@ stehen — die Stufen decken den sichtbaren Bereich je Breite ab.
 | „foodfotografie" fand nichts | Bindestrich-Wörter werden zusätzlich zusammengezogen abgelegt (278 solcher Wörter in 500 Motiven) |
 | falsche Reihenfolge bei „Reis"/„Reise" | Rangfolge: exakter Treffer (3) vor Wortkante (2) vor Grundform (1) |
 | „tomaten tauchen **in** wasser" fand weniger als ohne „in" (ab v3.9.0) | Füllwörter (Artikel, Verhältnis- & Bindewörter, DE **und** EN, ~150 Wörter) fliegen vor dem Vergleich raus, weil **alle** Suchwörter Pflicht sind und „in", „und", „the" … in keinem Schlagwort stehen. Anzeige-Text und URL bleiben unberührt. **Nicht** entfernt: Verneinung/Ausschluss (ohne, kein, without — sie kehren die Bedeutung um) und Zwiebelwörter, die anderssprachig Inhalt sind (war=Krieg, man=Mann, see=der See, boot, tag, hell, waren=Waren). „die" nur, wenn `<html lang>` ≠ `en`. Liste gegen den echten Katalog kollisionsgeprüft |
+| „yoshua tree" fand nichts (ab v3.11.0) | Tippfehler-Korrektur: ein Wort ohne einen einzigen Treffer im Katalog wird auf das nächstliegende Katalogwort umgebogen (ab 4 Buchstaben 1 Fehler, ab 8 zwei; Vertauschung zählt einfach) und das per Hinweis `data-kl-zeigen="korrektur"` angesagt — mit Link zurück zur Originalsuche. Ohne Hinweis-Element keine Korrektur. Details im Abschnitt „Tippfehler-Korrektur" |
 | Beim Filtern blitzten Treffer auf, DANACH kam die Ladeanzeige (ab v3.10.2) | `zeichne()` rief `zeichneTreffer()` sofort auf, `ladeAnzeige(true)` startete aber nur den 250-ms-Timer (`CFG.ladenAbMs`) — die Maske kam also **nach** den Teiltreffern. Jetzt sind Zwischenstände gesperrt, solange geladen wird und die Maske noch nicht steht; nur der Abschluss zeichnet erzwungen. Unter 250 ms: keine Maske, ein sauberer Sprung. Länger: bis zur Maske bleibt die alte Liste stehen, die Wellen zeichnen darunter. Tritt nur auf, wenn vor Abschluss des Vorladens gefiltert wird — danach greift der Sofort-Pfad ohne Maske |
 | Einzelseiten brauchten ein eigenes Hover-Snippet (ab v3.10.1) | `stock.js` stieg ohne Collection-Liste sofort aus (`if (!listWrap) return`) — auf `/stockfotos-videos/[slug]` gibt es zwar 3 Listen mit Hover-Videos, aber keine ist als Stock-Liste getaggt. Deshalb lag dort ein eigenes Footer-Snippet, das **nur Hover** konnte: keine Mittig-im-Bild-Automatik auf Touch (ein angetipptes Video hielt nie wieder an, weil es nur auf `mouseleave` stoppte), kein faules Metadaten-Laden (`preload="metadata"` für alle Videos sofort) und kein `prefers-reduced-motion`. Die Video-Sektion steht jetzt **vor** dem Ausstieg, und ohne Liste wird nur sie gebunden. Das Snippet kann ersatzlos raus |
 | Sprachwechsel verwarf die ganze Auswahl (ab v3.10.0) | Webflows Umschalter rendert feste Links (`<a hreflang="en" href="/en/stock-photos-videos">`) — wer auf Deutsch nach Tieren filterte, landete auf Englisch im ungefilterten Katalog. Die Links werden jetzt bei jeder Änderung neu geschrieben, mit übersetzten **Feldnamen und Werten**: `?kategorie=tiere,zeitraffer&typ=video` → `?category=animals,timelapse&type=video`. Tabelle mit 23 Paaren, eindeutig in beide Richtungen; unbekannte Werte fallen weg statt einen kaputten Filter zu erzeugen. Die Seitenzahl bleibt bewusst weg (in der anderen Sprache startet man auf Seite 1) |

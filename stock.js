@@ -62,8 +62,19 @@
  * den Chips steht und nur sichtbar ist, solange welche da sind (echte
  * Vorschläge ODER feste Auswahl) — nie im ganz leeren Container.
  *
+ * TIPPFEHLER-KORREKTUR (ab v3.11.0)
+ * Findet ein Suchwort im GANZEN Katalog nichts, sucht das Skript stattdessen
+ * nach dem nächstliegenden Katalogwort („yoshua tree" → „Joshua tree") und
+ * sagt das sichtbar an. Nur aktiv, wenn die Seite den Hinweis mitbringt —
+ * ohne ihn bleibt es beim Leerzustand mit Vorschlägen:
+ *   <div data-kl-zeigen="korrektur" class="… u-d-none">
+ *     Ergebnisse für „<span data-kl-text="korrektur"></span>"
+ *     <a data-kl-original>Stattdessen nach „<span data-kl-text="suche"></span>" suchen</a>
+ *   </div>
+ * Der Klick auf [data-kl-original] zeigt das ungekorrigierte Ergebnis.
+ *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.10.2/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.11.0/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -93,6 +104,11 @@
     ladenAbMs: 250,                // so lange muss geladen werden, bis „laden" gemeldet wird
     sucheBeimSprachwechsel: true,  // Suchbegriff in den Sprachumschalter-Link mitnehmen
     vorschlaegeMax: 4,             // so viele Gegenvorschläge höchstens
+    /* Tippfehler-Korrektur: Wörter ab so vielen Buchstaben vertragen 1 bzw.
+       2 Fehler. Gleiche Schwellen wie Algolias Standard; am Katalog geprüft
+       (siehe „Tippfehler-Korrektur" weiter unten). */
+    korrekturAb: 4,
+    korrekturZweiAb: 8,
     /* Beschriftung des Chips, der bei „Begriff ok, Filter schliesst aus"
        erscheint. %n wird durch die Trefferzahl ohne Filter ersetzt.
        Sprache nach <html lang>. */
@@ -105,7 +121,7 @@
     eagerStufen: [[1920, 26], [1440, 20], [1280, 14], [992, 10], [768, 6], [0, 0]]
   };
 
-  var VERSION = "3.10.2";
+  var VERSION = "3.11.0";
   var d = document;
   var qs = function (s, r) { return (r || d).querySelector(s); };
   var qsa = function (s, r) { return Array.prototype.slice.call((r || d).querySelectorAll(s)); };
@@ -833,8 +849,7 @@
     return true;
   }
 
-  function treffer() {
-    var f = aktiveFilter(), felder = Object.keys(f), begriffe = suchBegriffe();
+  function trefferFuer(begriffe, f, felder) {
     var muster = musterBauen(begriffe);
     var liste = alleItems().filter(function (it) {
       if (!filterPasst(it, f, felder)) return false;
@@ -850,6 +865,24 @@
     return liste;
   }
 
+  /* Findet die Suche nichts, wird es mit der Tippfehler-Korrektur noch einmal
+     versucht. Es reicht, das erst bei 0 Treffern zu tun: korrigiert werden nur
+     Wörter, die im ganzen Katalog nichts finden — und gibt es Treffer, haben
+     alle Wörter welche (alle müssen ja vorkommen). Bringt auch die Korrektur
+     nichts, bleibt es beim Leerzustand mit seinen Vorschlägen. */
+  var korrekturAktiv = null;       // stammen die gezeigten Treffer aus einer Korrektur?
+  function treffer() {
+    var f = aktiveFilter(), felder = Object.keys(f), begriffe = suchBegriffe();
+    var liste = trefferFuer(begriffe, f, felder);
+    korrekturAktiv = null;
+    if (!liste.length) {
+      var k = korrekturFuer(begriffe);
+      var alt = k ? trefferFuer(k.begriffe, f, felder) : [];
+      if (alt.length) { liste = alt; korrekturAktiv = k; }
+    }
+    return liste;
+  }
+
   /* Wie viele Treffer haette die Suche OHNE die angehakten Filter?
      Damit unterscheidet der Leerzustand zwei sehr verschiedene Faelle:
      „den Begriff gibt es nicht" gegen „den Begriff gibt es, nur nicht in
@@ -859,6 +892,17 @@
   function trefferOhneFilter() {
     var begriffe = suchBegriffe();
     if (!begriffe.length) return 0;
+    var n = trefferZahl(begriffe);
+    /* Auch hier mit Korrektur: „yoshua tree" in der Kategorie Tiere ergibt 0,
+       ohne Filter aber die Joshua-Bäume — dann soll der Chip „Ohne Filter (2)"
+       erscheinen und nicht „Joshua" als Tippfehler vorgeschlagen werden. */
+    if (!n) {
+      var k = korrekturFuer(begriffe);
+      if (k) n = trefferZahl(k.begriffe);
+    }
+    return n;
+  }
+  function trefferZahl(begriffe) {
     var muster = musterBauen(begriffe), items = alleItems(), n = 0;
     for (var i = 0; i < items.length; i++) if (punkteFuer(items[i], muster)) n++;
     return n;
@@ -871,6 +915,7 @@
     if (insFeld && suchFeld) suchFeld.value = wort;
     if (wort === angewandteSuche) return;
     angewandteSuche = wort;
+    korrekturAus = null;             // „Stattdessen …" galt nur für die vorige Suche
     seite = 1;
     urlSchreiben();
     zeichne(false);
@@ -936,26 +981,159 @@
     return liste;
   }
 
-  /* Levenshtein mit Deckel: sobald feststeht, dass der Abstand über `max`
+  /* Editierabstand mit Deckel: sobald feststeht, dass der Abstand über `max`
      liegt, wird abgebrochen. Ohne den Deckel kostet der Vergleich gegen
-     tausende Wörter spürbar Zeit. */
+     tausende Wörter spürbar Zeit.
+     Zwei vertauschte Nachbarbuchstaben („hosue") zählen als EIN Fehler, nicht
+     als zwei — der häufigste Tippfehler überhaupt (Damerau, „optimal string
+     alignment"). Der Abbruch bleibt gültig: auch mit Vertauschung kann das
+     Zeilenminimum nach unten nicht kleiner werden. */
   function abstand(a, b, max) {
     var la = a.length, lb = b.length;
     if (Math.abs(la - lb) > max) return max + 1;
-    var vorher = [], jetzt = [], i, j;
+    var vorvorher = [], vorher = [], jetzt = [], i, j;
     for (j = 0; j <= lb; j++) vorher[j] = j;
     for (i = 1; i <= la; i++) {
       jetzt[0] = i;
       var best = i;
       for (j = 1; j <= lb; j++) {
         var kosten = a.charCodeAt(i - 1) === b.charCodeAt(j - 1) ? 0 : 1;
-        jetzt[j] = Math.min(jetzt[j - 1] + 1, vorher[j] + 1, vorher[j - 1] + kosten);
-        if (jetzt[j] < best) best = jetzt[j];
+        var v = Math.min(jetzt[j - 1] + 1, vorher[j] + 1, vorher[j - 1] + kosten);
+        if (i > 1 && j > 1 && a.charCodeAt(i - 1) === b.charCodeAt(j - 2) &&
+            a.charCodeAt(i - 2) === b.charCodeAt(j - 1)) v = Math.min(v, vorvorher[j - 2] + 1);
+        jetzt[j] = v;
+        if (v < best) best = v;
       }
       if (best > max) return max + 1;
-      var tausch = vorher; vorher = jetzt; jetzt = tausch;
+      var tausch = vorvorher; vorvorher = vorher; vorher = jetzt; jetzt = tausch;
     }
     return vorher[lb];
+  }
+
+  /* ── Tippfehler-Korrektur ──────────────────────────────────────
+     „yoshua tree" findet nichts, „joshua tree" schon. Statt nur den Chip
+     „Joshua" anzubieten, wird gleich korrigiert gesucht und das angesagt:
+     „Ergebnisse für „Joshua tree" · Stattdessen nach „yoshua tree" suchen".
+
+     Die Regeln, am Katalog geprüft (3.535 Motive, DE und EN):
+     - Korrigiert wird nur ein Wort, das im GANZEN Katalog nichts findet. Ein
+       Wort mit Treffern bleibt unangetastet — sonst würde „Baum" auch „Raum"
+       finden. Ständige Toleranz verbietet sich: 86 % der 4-Buchstaben-Wörter
+       im Katalog haben einen Nachbarn mit nur einem Buchstaben Unterschied
+       (Baum/Raum, rosa/Rost, Himmel/Hummel, light/night, weather/feather).
+     - Ab 4 Buchstaben 1 Fehler, ab 8 Buchstaben 2 (CFG.korrekturAb/ZweiAb).
+     - Gewinner ist das Katalogwort mit dem kleinsten Abstand, bei Gleichstand
+       das häufigste.
+     Ergebnis an simulierten Tippfehlern: richtiges Wort gefunden in 100 % (DE)
+     bzw. 99 % (EN), an erster Stelle in 97 % bzw. 94 %. Die Kehrseite: ein
+     korrekt geschriebenes Wort, das es im Katalog nicht gibt, kann umgebogen
+     werden (Arzt→Art, mouse→house) — 2 von 119 bzw. 3 von 115 Alltagswörtern.
+     Deshalb ist der Hinweis Pflicht: ohne [data-kl-zeigen="korrektur"] auf der
+     Seite wird gar nicht korrigiert, dann bleibt es beim Leerzustand.
+
+     Wartet auf den vollständigen Katalog: ob ein Wort „nirgends" vorkommt,
+     lässt sich erst sagen, wenn alle Seiten da sind. Während des Ladens liegt
+     ohnehin die Maske über der Liste. */
+  var korrekturIndex = null;          // [[wort, anzahl Motive], …] — ganzer Katalog
+  var korrekturMerk = { schluessel: null, wert: null };
+  var korrekturAus = null;            // „Stattdessen …" geklickt — gilt bis zur nächsten Suche
+  var anzeigeMerk = Object.create(null);
+
+  /* Vokabular aus dem vollen Suchtext (auch Ort, Land) und ohne Filter: auch
+     „mallorka" soll Mallorca finden, das oft nur im Ortsfeld steht. Gezählt
+     wird je Motiv, nicht je Vorkommen. */
+  function korrekturIndexBauen() {
+    var t0 = Date.now(), zaehl = Object.create(null), items = alleItems();
+    for (var i = 0; i < items.length; i++) {
+      var worte = items[i].such.split(" "), gesehen = Object.create(null);
+      for (var j = 0; j < worte.length; j++) {
+        var w = worte[j];
+        if (w.length < 3 || gesehen[w] || !NUR_BUCHSTABEN.test(w)) continue;
+        gesehen[w] = 1;
+        zaehl[w] = (zaehl[w] || 0) + 1;
+      }
+    }
+    var liste = [];
+    for (var wort in zaehl) liste.push([wort, zaehl[wort]]);
+    log("Korrektur-Verzeichnis:", liste.length, "Wörter in", Date.now() - t0, "ms");
+    return liste;
+  }
+
+  function wortTrifft(w) {
+    var muster = musterBauen([w]), items = alleItems();
+    for (var i = 0; i < items.length; i++) if (punkteFuer(items[i], muster)) return true;
+    return false;
+  }
+
+  function naechstesWort(b) {
+    if (!korrekturIndex) korrekturIndex = korrekturIndexBauen();
+    var max = b.length >= CFG.korrekturZweiAb ? 2 : 1;
+    var best = null, bestAbstand = max + 1, bestAnzahl = 0;
+    for (var i = 0; i < korrekturIndex.length; i++) {
+      var w = korrekturIndex[i][0];
+      if (Math.abs(w.length - b.length) > max) continue;
+      var a = abstand(b, w, max);
+      if (a > max) continue;
+      if (a < bestAbstand || (a === bestAbstand && korrekturIndex[i][1] > bestAnzahl)) {
+        best = w; bestAbstand = a; bestAnzahl = korrekturIndex[i][1];
+      }
+    }
+    return best;
+  }
+
+  /* Liefert { begriffe: [...korrigiert], ersetzt: { alt: neu } } oder null. */
+  function korrekturFuer(begriffe) {
+    if (!alleGeladen || !begriffe.length) return null;
+    if (!qs('[data-kl-zeigen="korrektur"]')) return null;
+    if (korrekturAus !== null && korrekturAus === angewandteSuche) return null;
+    var schluessel = begriffe.join(" ");
+    if (korrekturMerk.schluessel === schluessel) return korrekturMerk.wert;
+    var ersetzt = null;
+    var neu = begriffe.map(function (b) {
+      if (b.length < CFG.korrekturAb || !NUR_BUCHSTABEN.test(b) || wortTrifft(b)) return b;
+      var w = naechstesWort(b);
+      if (!w) return b;
+      (ersetzt = ersetzt || {})[b] = w;
+      return w;
+    });
+    var wert = ersetzt ? { begriffe: neu, ersetzt: ersetzt } : null;
+    korrekturMerk = { schluessel: schluessel, wert: wert };
+    if (wert) log("Korrektur:", JSON.stringify(ersetzt));
+    return wert;
+  }
+
+  /* Angezeigt wird das Wort so, wie es im Katalog steht („Küste", nicht die
+     interne Form „kueste"): aus dem ersten Motiv, das es enthält. */
+  function anzeigeForm(wort) {
+    if (anzeigeMerk[wort]) return anzeigeMerk[wort];
+    var muster = exaktMuster(wort), items = alleItems(), form = wort;
+    for (var i = 0; i < items.length && form === wort; i++) {
+      if (!muster.test(items[i].such)) continue;
+      var f = feldWerte(items[i].el), roh = [];
+      for (var k in f) roh.push(f[k].join(" "));
+      var teile = roh.join(" ").split(/[\s\-–—\/,;:.!?()"'„“”«»]+/);
+      for (var j = 0; j < teile.length; j++) {
+        if (teile[j] && norm(teile[j]) === wort) { form = teile[j]; break; }
+      }
+    }
+    anzeigeMerk[wort] = form;
+    return form;
+  }
+
+  /* Der Suchtext, wie getippt — nur die korrigierten Wörter ausgetauscht.
+     Füllwörter und Schreibweise der übrigen Wörter bleiben stehen. */
+  function korrigierterText() {
+    if (!korrekturAktiv) return "";
+    var ersetzt = korrekturAktiv.ersetzt;
+    return angewandteSuche.trim().split(/\s+/).map(function (tok) {
+      var geaendert = false;
+      var teile = norm(tok).split(" ").map(function (t) {
+        if (!ersetzt[t]) return t;
+        geaendert = true;
+        return anzeigeForm(ersetzt[t]);
+      });
+      return geaendert ? teile.join(" ") : tok;
+    }).join(" ");
   }
 
   function vorschlaegeFinden() {
@@ -1189,6 +1367,14 @@
     if (laufendeGesamt !== null)
       qsa('[data-kl-text="anzahl"]').forEach(function (el) { el.textContent = String(laufendeGesamt); });
 
+    /* Korrigierter Suchtext für den Hinweis — nur befüllen, wenn es einen
+       gibt; sonst ist der Hinweis ohnehin versteckt und behält seinen Text. */
+    var korrigiert = korrigierterText();
+    if (korrigiert) {
+      w.setAttribute("data-kl-korrektur", korrigiert);
+      qsa('[data-kl-text="korrektur"]').forEach(function (el) { el.textContent = korrigiert; });
+    } else w.removeAttribute("data-kl-korrektur");
+
     /* Der Leerhinweis richtet sich nach `laedt` DIREKT, nicht nach dem nach
        außen gemeldeten Zustand: solange geladen wird, darf er nie erscheinen
        (das war der Blitzer). */
@@ -1221,7 +1407,9 @@
 
     qsa("[data-kl-zeigen]").forEach(function (el) {
       var rolle = el.getAttribute("data-kl-zeigen");
-      var an = rolle === "ende" ? ende : rolle === zustand;
+      var an = rolle === "ende" ? ende
+             : rolle === "korrektur" ? zustand === "treffer" && !!korrekturAktiv
+             : rolle === zustand;
       /* Die Ladeanzeige erscheint OHNE Einblend-Fade (sofort voll da), damit
          beim Laden nichts halbtransparent aufblitzt; „leer" und „ende" blenden
          weiter weich ein. Das Ausblenden bleibt bei allen weich. */
@@ -1280,6 +1468,7 @@
   function zeichne(scrollen) {
     var gefiltert = istGefiltert();
     if (!gefiltert) {
+      korrekturAktiv = null;             // ohne Suche gibt es nichts zu korrigieren
       /* Ungefiltert: genau EINE Seite holen statt des ganzen Katalogs. */
       ladeAnzeige(!seiten[seite]);
       seiteHolen(seite).then(function (items) {
@@ -1447,6 +1636,7 @@
     });
     if (suchFeld) suchFeld.value = p.get(CFG.suchParam) || "";
     angewandteSuche = p.get(CFG.suchParam) || "";
+    korrekturAus = null;
     optikSync();
     var sn = parseInt(p.get(pagParam) || "1", 10);
     seite = isNaN(sn) || sn < 1 ? 1 : sn;
@@ -1559,6 +1749,7 @@
     });
     if (suchFeld) suchFeld.value = "";
     angewandteSuche = "";
+    korrekturAus = null;
     seite = 1;
     sperre = false;
     optikSync();
@@ -1584,6 +1775,21 @@
   }
 
   window.addEventListener("kl:neu-suchen", function () { neueSuche(); });
+
+  /* „Stattdessen nach … suchen" im Korrektur-Hinweis: dieselbe Suche ohne
+     Korrektur, also Leerzustand mit Vorschlägen. Gilt nur für genau diesen
+     Suchtext — sobald weitergetippt wird, korrigiert die Suche wieder.
+     Delegiert, damit es egal ist, wann der Link im DOM steht. */
+  d.addEventListener("click", function (e) {
+    var link = e.target.closest && e.target.closest("[data-kl-original]");
+    if (!link) return;
+    e.preventDefault();
+    korrekturAus = angewandteSuche;
+    seite = 1;
+    urlSchreiben();
+    zeichne(false);
+    log("Korrektur abgewählt für:", angewandteSuche);
+  });
 
   var tippTimer = null;
   if (filterForm) {
@@ -1711,7 +1917,8 @@
         status: d.documentElement.getAttribute("data-kl-liste"),
         ende: d.documentElement.hasAttribute("data-kl-ende"),
         karten: qsa(".u-link-cover").length,
-        gebunden: qsa(".u-link-cover[data-kl-hover]").length
+        gebunden: qsa(".u-link-cover[data-kl-hover]").length,
+        korrektur: korrigierterText() || null
       };
     },
     geheZuSeite: geheZuSeite,
