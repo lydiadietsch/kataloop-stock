@@ -305,10 +305,16 @@ kann umgebogen werden — Arzt→Art, Ratte→Matte, mouse→house, shark→shar
 <div data-kl-zeigen="korrektur" class="u-pb-1 u-d-none">
   <div class="paragraph-xs u-text-white u-weight400">
     Ergebnisse für „<span data-kl-text="korrektur" class="u-text-yellow200">Joshua tree</span>"
-    · <a href="#" data-kl-original class="u-text-link">Stattdessen nach „<span data-kl-text="suche">Yoshua tree</span>" suchen</a>
+    · <a href="#" data-kl-original class="u-text-link u-text-white">Stattdessen nach „<span data-kl-text="suche">Yoshua tree</span>" suchen</a>
   </div>
 </div>
 ```
+
+In Webflow steht der Hinweis nativ (kein Embed) als „Suche – Korrektur-Hinweis"
+über dem Raster auf `/stockfotos-videos`, Englisch als Übersetzung der Seite.
+`u-text-white` am Link ist nötig: `u-text-link` setzt keine Farbe, sonst greift
+die dunkelgrüne Standard-Linkfarbe. Achtung: die EN-Übersetzung speichert die
+Klassen mit — wer am deutschen Hinweis Klassen ändert, muss sie in EN nachziehen.
 
 **Ohne** `[data-kl-zeigen="korrektur"]` auf der Seite wird gar nicht
 korrigiert — dann bleibt es beim Leerzustand mit Vorschlägen. Der Hinweis
