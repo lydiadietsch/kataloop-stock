@@ -1,90 +1,160 @@
 /**
- * Kataloop Stock – Video-Player für die Kaufseiten (Lydia, 21.11.2026)
- * Leiste mit Abspielen/Pause, Zeitleiste, Zeit, Auflösung (gelieferte Breite auf ganze K),
- * Lupe (Detailaufnahme als Ebene statt „Klicken zum Vergrößern“) und Vollbild der ganzen Karte.
- * Läuft nur, wenn die Seite ein video.image.cc-purchase hat; Fotos bleiben unverändert.
+ * Kataloop Stock – Bedienung der Kaufseite (Lydia, 21.11.2026), ab v4.0.0
+ *
+ * Alles Sichtbare ist nativ in Webflow gebaut (CMS-Vorlage „Stock-assets Template“,
+ * Klassen kl-…, Navigator: „Video-Player (nur Video)“, „Lupe (Foto und Video)“,
+ * „Detail-Ebene (Lupe)“). Was Webflow nicht kann, steht im Head-Code der Vorlage
+ * (Masken der Blur-Ebenen, Touch, Vollbild). Dieses Skript schaltet nur Zustände um:
+ *   is-on     – Leiste und Blur sichtbar (jedes Element einzeln, sonst greift backdrop-filter verspätet)
+ *   is-hidden – Icons und Texte, die gerade nicht gelten
+ *   is-open   – Detail-Ebene offen
+ *   is-solo   – Lupe ohne Kamera-Symbol daneben
+ * Bei Fotos entfernt es den Video-Player; die Lupe gilt für Foto und Video.
  * Bauen: esbuild player.js --minify --legal-comments=none --target=es2017 --outfile=player.min.js
  */
-(function(){
-  if(!document.querySelector('video.image.cc-purchase')||document.getElementById('kl-player-css')) return;
-  var st=document.createElement('style'); st.id='kl-player-css'; st.textContent="/* sizes in rem like the camera icon (.stock-icon-wrapper), so they scale with it on small screens */\n.kl-player{position:absolute;inset:0;z-index:5;pointer-events:none;font-family:S\u00f6hne,\"Times New Roman\",sans-serif;color:rgb(241,244,241)}\n/* soft blur from the bottom (after the homepage .pblur, but cumulative so there are no bands): behind the bar and 10 px + 1rem above it (Lydia, 21.11.).\n   Nothing above the blur layers may fade (opacity on an ancestor switches backdrop-filter off until the fade ends), so each layer animates its own blur. */\n.kl-player{--kl-bar-bottom:8px;--kl-bar-h:1.2rem;--kl-t:.25s ease}\n.kl-player__shade{position:absolute;left:0;right:0;bottom:0;height:calc(var(--kl-bar-bottom) + var(--kl-bar-h) + 10px + 1.5rem);pointer-events:none}\n.kl-player__shade>div{position:absolute;inset:0;-webkit-backdrop-filter:blur(0);backdrop-filter:blur(0);transition:backdrop-filter var(--kl-t),-webkit-backdrop-filter var(--kl-t),opacity var(--kl-t)}\n.kl-player__shade>.kl-dim{-webkit-backdrop-filter:none;backdrop-filter:none;opacity:0;background-image:linear-gradient(to bottom,rgba(0,0,0,0) 0%,rgba(0,0,0,.006) 20%,rgba(0,0,0,.024) 40%,rgba(0,0,0,.055) 60%,rgba(0,0,0,.1) 80%,rgba(0,0,0,.16) 100%)}\n.kl-player__shade>div:nth-child(1){-webkit-mask-image:linear-gradient(to bottom,transparent 0%,#000 100%);mask-image:linear-gradient(to bottom,transparent 0%,#000 100%)}\n:is(.kl-player.is-active,.kl-player.is-paused) .kl-player__shade>div:nth-child(1){-webkit-backdrop-filter:blur(0.4px);backdrop-filter:blur(0.4px)}\n.kl-player__shade>div:nth-child(2){-webkit-mask-image:linear-gradient(to bottom,transparent 18%,#000 100%);mask-image:linear-gradient(to bottom,transparent 18%,#000 100%)}\n:is(.kl-player.is-active,.kl-player.is-paused) .kl-player__shade>div:nth-child(2){-webkit-backdrop-filter:blur(0.8px);backdrop-filter:blur(0.8px)}\n.kl-player__shade>div:nth-child(3){-webkit-mask-image:linear-gradient(to bottom,transparent 36%,#000 100%);mask-image:linear-gradient(to bottom,transparent 36%,#000 100%)}\n:is(.kl-player.is-active,.kl-player.is-paused) .kl-player__shade>div:nth-child(3){-webkit-backdrop-filter:blur(1.2px);backdrop-filter:blur(1.2px)}\n.kl-player__shade>div:nth-child(4){-webkit-mask-image:linear-gradient(to bottom,transparent 54%,#000 100%);mask-image:linear-gradient(to bottom,transparent 54%,#000 100%)}\n:is(.kl-player.is-active,.kl-player.is-paused) .kl-player__shade>div:nth-child(4){-webkit-backdrop-filter:blur(1.6px);backdrop-filter:blur(1.6px)}\n.kl-player__shade>div:nth-child(5){-webkit-mask-image:linear-gradient(to bottom,transparent 72%,#000 100%);mask-image:linear-gradient(to bottom,transparent 72%,#000 100%)}\n:is(.kl-player.is-active,.kl-player.is-paused) .kl-player__shade>div:nth-child(5){-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}\n:is(.kl-player.is-active,.kl-player.is-paused) .kl-player__shade>.kl-dim{opacity:1}\n@media (hover:none){.kl-player__shade>.kl-dim{opacity:1}.kl-player__shade>div:nth-child(1){-webkit-backdrop-filter:blur(0.4px);backdrop-filter:blur(0.4px)}.kl-player__shade>div:nth-child(2){-webkit-backdrop-filter:blur(0.8px);backdrop-filter:blur(0.8px)}.kl-player__shade>div:nth-child(3){-webkit-backdrop-filter:blur(1.2px);backdrop-filter:blur(1.2px)}.kl-player__shade>div:nth-child(4){-webkit-backdrop-filter:blur(1.6px);backdrop-filter:blur(1.6px)}.kl-player__shade>div:nth-child(5){-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}}\n.kl-player__bar{position:absolute;left:8px;right:8px;bottom:var(--kl-bar-bottom);display:flex;align-items:center;gap:8px;pointer-events:none}\n.kl-player__bar>*{opacity:0;transform:translateY(4px);transition:opacity var(--kl-t),transform var(--kl-t)}\n:is(.kl-player.is-active,.kl-player.is-paused) .kl-player__bar>*{opacity:1;transform:none;pointer-events:auto}\n@media (hover:none){.kl-player__bar>*{opacity:1;transform:none;pointer-events:auto}}\n.kl-player__btn{flex:none;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);display:grid;place-items:center;width:1.8rem;height:1.2rem;border:0;border-radius:320px;background:rgba(0,0,0,.7);cursor:pointer;padding:0;color:inherit}\n.kl-player__btn svg{width:.6rem;height:.6rem;display:block}\n/* fullscreen: Ultimate Regular Expand 5 / Shrink 4, stroke 2, smaller square, #e5ebe5 like the arrow of the download button (Lydia, 21.11.) */\n[data-full]{color:#e5ebe5}\n[data-full] svg{width:.5625rem;height:.5625rem}\n.kl-player__btn:focus-visible,.kl-player__track:focus-visible{outline:2px solid rgb(241,244,241);outline-offset:2px}\n.kl-player__time,.kl-player__chip{flex:none;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);font-size:.7rem;line-height:1.2rem;padding:0 8px;border-radius:320px;background:rgba(0,0,0,.7);font-variant-numeric:tabular-nums;white-space:nowrap}\n/* round pills next to each other look further apart than the gap says: 3 px less (Lydia, 21.11.) */\n.kl-player__chip,[data-full]{margin-left:-3px}\n.kl-player__track{position:relative;flex:1;height:1.2rem;cursor:pointer;touch-action:none}\n.kl-player__rail{position:absolute;left:0;right:0;top:50%;height:3px;margin-top:-1.5px;border-radius:3px;background:rgba(241,244,241,.35);overflow:hidden}\n/* the played part keeps the round end of the rail on its right side too (Lydia, 21.11.) */\n.kl-player__fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:3px;background:rgb(241,244,241)}\n.kl-player__knob{position:absolute;top:50%;width:.625rem;height:.625rem;margin:-5px 0 0 -5px;border-radius:50%;background:rgb(241,244,241);box-shadow:0 0 0 3px rgba(0,0,0,.25);transform:scale(0);transition:transform .15s ease}\n.kl-player__track:hover .kl-player__knob,.kl-player__track.is-drag .kl-player__knob{transform:scale(1)}\n.kl-player__big{position:absolute;left:50%;top:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;border:0;background:rgba(0,0,0,.7);display:grid;place-items:center;cursor:pointer;pointer-events:none;opacity:0;transition:opacity .2s ease}\n.kl-player__big svg{width:1.125rem;height:1.125rem;margin-left:.1875rem}\n.kl-player.is-paused .kl-player__big{opacity:1;pointer-events:auto}\n.card.cc-stock:fullscreen{width:100vw;height:100vh;border-radius:0;background:#000;display:flex;align-items:center;justify-content:center}\n.card.cc-stock:fullscreen video.image.cc-purchase{width:100%;height:100%;object-fit:contain}\n.card.cc-stock:fullscreen .kl-player{--kl-bar-bottom:24px}\n.card.cc-stock:fullscreen .kl-player__bar{left:24px;right:24px}\n/* Zoom photo on videos (Lydia, 21.11.): a magnifier pill in the bar instead of \"click to enlarge\" on the whole video,\n   which now only plays and pauses. The detail opens as a layer over the video. */\n/* the page puts a zoom-in cursor on the video; the surface does nothing now, so the normal cursor, a pointer only on controls */\n.card.cc-stock:has(.kl-player) .image.cc-purchase{cursor:default!important}\n.card.cc-stock:has(.kl-player) .btn.cc-zoom,.card.cc-stock:has(.kl-player) .btn.cc-original,.card.cc-stock:has(.kl-player) .cc-purchase-zoom{display:none!important}\n.kl-zoom-pill{position:absolute;z-index:5;top:.4rem;right:calc(.4rem + 1.8rem + .25rem);width:1.8rem;height:1.2rem;padding:0;border:0;border-radius:20rem;display:grid;place-items:center;cursor:pointer;color:#e5ebe5;background:rgba(0,0,0,.7);-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}\n.kl-zoom-pill svg{width:.625rem;height:.625rem;display:block}\n.kl-zoom-pill:focus-visible{outline:2px solid rgb(241,244,241);outline-offset:2px}\n.kl-zoom{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;background:rgba(16,20,16,.55);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);opacity:0;pointer-events:none;transition:opacity var(--kl-t,.25s ease);cursor:default}\n.kl-zoom.is-open{opacity:1;pointer-events:auto}\n.kl-zoom img{max-width:100%;max-height:100%;width:auto;height:100%;object-fit:contain;display:block}\n.kl-zoom__label,.kl-zoom__close{position:absolute;top:8px;font-family:S\u00f6hne,\"Times New Roman\",sans-serif;font-size:.7rem;line-height:1.2rem;color:rgb(241,244,241);background:rgba(0,0,0,.7);border-radius:320px}\n.kl-zoom__label{left:8px;padding:0 8px}\n.kl-zoom__close{right:8px;width:1.8rem;height:1.2rem;border:0;padding:0;display:grid;place-items:center;cursor:pointer;color:#e5ebe5}\n.kl-zoom__close svg{width:8px;height:8px}\n.kl-zoom__close:focus-visible{outline:2px solid rgb(241,244,241);outline-offset:2px}\n@media (prefers-reduced-motion:reduce){.kl-player *{transition:none!important}}"; document.head.appendChild(st);
+(function () {
+  var card = document.querySelector('.card.cc-stock');
+  if (!card || card.getAttribute('data-kl-ready')) return;
+  card.setAttribute('data-kl-ready', '1');
+  var q = function (s, root) { return (root || card).querySelector(s); };
+  var qa = function (s, root) { return Array.prototype.slice.call((root || card).querySelectorAll(s)); };
+  var v = q('video.image.cc-purchase');
+  var isVideo = !!v;
+  var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var show = function (el, on) { if (el) el.classList.toggle('is-hidden', !on); };
+  function play() { var r = v.play(); if (r && r.catch) r.catch(function () {}); }
 
-  var ZOOM_ICON="<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.06\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><g vector-effect=\"non-scaling-stroke\"><circle vector-effect=\"non-scaling-stroke\" cx=\"10.4\" cy=\"10.4\" r=\"8.9\"/><path vector-effect=\"non-scaling-stroke\" d=\"M10.4 6V14.8M6 10.4H14.8\"/><path vector-effect=\"non-scaling-stroke\" d=\"M16.7 16.7L21.6 21.6\"/></g></svg>", CLOSE_ICON="<svg viewBox=\"-1 -1 24 24\" xmlns=\"http://www.w3.org/2000/svg\" id=\"Close--Streamline-Ultimate\"> <path d=\"m0.6875 21.31158333333333 20.625 -20.625\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"></path> <path d=\"M21.3125 21.31158333333333 0.6875 0.6865833333333333\" fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"></path> </svg>"; var ICON={"play": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" id=\"Controls-Play--Streamline-Ultimate\"> <path d=\"M23.14 10.61 2.25 0.16A1.56 1.56 0 0 0 0 1.56v20.88a1.56 1.56 0 0 0 2.25 1.4l20.89 -10.45a1.55 1.55 0 0 0 0 -2.78Z\" fill=\"#ffffff\" stroke-width=\"1\"></path> </svg>", "pause": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" id=\"Controls-Pause--Streamline-Ultimate\"> <g> <path d=\"M4.5 1h4S10 1 10 2.5v19S10 23 8.5 23h-4S3 23 3 21.5v-19S3 1 4.5 1\" fill=\"#ffffff\" stroke-width=\"1\"></path> <path d=\"M15.5 1h4S21 1 21 2.5v19s0 1.5 -1.5 1.5h-4S14 23 14 21.5v-19S14 1 15.5 1\" fill=\"#ffffff\" stroke-width=\"1\"></path> </g> </svg>"}, ALTS={"Expand 5": "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.83\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1.6 8.8V1.6H8.8M1.6 1.6L9.6 9.6\"/><path d=\"M15.2 1.6H22.4V8.8M22.4 1.6L14.4 9.6\"/><path d=\"M1.6 15.2V22.4H8.8M1.6 22.4L9.6 14.4\"/><path d=\"M15.2 22.4H22.4V15.2M22.4 22.4L14.4 14.4\"/></svg>"}, EXITS={"Expand 5": "<svg viewBox=\"0 0 24 24\" xmlns=\"http://www.w3.org/2000/svg\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.83\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1.6 1.6L9.6 9.6M9.6 2.3999999999999995V9.6H2.3999999999999995\"/><path d=\"M22.4 1.6L14.4 9.6M14.4 2.3999999999999995V9.6H21.6\"/><path d=\"M1.6 22.4L9.6 14.4M9.6 21.6V14.4H2.3999999999999995\"/><path d=\"M22.4 22.4L14.4 14.4M14.4 21.6V14.4H21.6\"/></svg>"}, HIDE_AFTER=3500;
-  var v=document.querySelector('video.image.cc-purchase'); if(!v) return;
-  var box=v.closest('.card')||v.parentElement;
-  var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if(reduce){v.removeAttribute('autoplay');v.pause();}
-  var fullName='Expand 5', fullIcon=ALTS[fullName];
-  var zImg=box.querySelector('.cc-purchase-zoom img'), zoomSrc=zImg&&(zImg.currentSrc||zImg.getAttribute('src'));
-  var el=document.createElement('div'); el.className='kl-player';
-  el.innerHTML='<button class="kl-player__big" type="button" aria-label="Abspielen">'+ICON.play+'</button>'+
-   '<div class="kl-player__shade">'+'<div></div>'.repeat(5)+'<div class="kl-dim"></div></div><div class="kl-player__bar">'+
-   '<button class="kl-player__btn" type="button" data-toggle aria-label="Pause">'+ICON.pause+'</button>'+
-   '<div class="kl-player__track" role="slider" tabindex="0" aria-label="Zeitleiste" aria-valuemin="0"><div class="kl-player__rail"><div class="kl-player__fill"></div></div><div class="kl-player__knob"></div></div>'+
-   '<span class="kl-player__time" data-time>0:00 / 0:00</span><span class="kl-player__chip" data-res></span>'+
-   '<button class="kl-player__btn" type="button" data-full aria-label="Vollbild">'+fullIcon+'</button></div>';
-  box.appendChild(el);
-  if(zoomSrc){ var zp=document.createElement('button'); zp.type='button'; zp.className='kl-zoom-pill'; zp.setAttribute('data-zoom',''); zp.setAttribute('aria-label','Detailaufnahme ansehen'); zp.innerHTML=ZOOM_ICON; box.appendChild(zp);
-    // same size and line as the camera icon, 4 px to its left, whatever size the page gives that icon
-    var cam=box.querySelector('.stock-icon-wrapper');
-    var syncZ=function(){ if(!cam) return; var r=cam.getBoundingClientRect(), b=box.getBoundingClientRect(); if(!r.width) return;
-      zp.style.width=r.width+'px'; zp.style.height=r.height+'px'; zp.style.top=(r.top-b.top-box.clientTop)+'px'; zp.style.right=(b.right-r.left+4-(b.width-box.clientWidth-box.clientLeft))+'px';
-      var sv=zp.querySelector('svg'); sv.style.width=sv.style.height=Math.round(r.height*.6*10)/10+'px'; };
-    syncZ(); window.addEventListener('resize',syncZ); if(window.ResizeObserver) new ResizeObserver(syncZ).observe(box); }
-  var q=function(s){return el.querySelector(s)}, toggle=q('[data-toggle]'), big=q('.kl-player__big'), track=q('.kl-player__track'), fill=q('.kl-player__fill'), knob=q('.kl-player__knob'), time=q('[data-time]'), full=q('[data-full]');
-  var fmt=function(s){s=Math.max(0,s||0);return Math.floor(s/60)+':'+('0'+Math.floor(s%60)).slice(-2)};
-  // The last frame, not the end: setting currentTime to duration makes a looping video jump to frame 1.
-  var FRAME=1/30, end=function(){return Math.max(0,(v.duration||0)-FRAME)};
-  function meta(){ if(!v.videoWidth) return;
-    var m=(document.body.innerText.match(/\((\d{3,5})\s*[x×]\s*(\d{3,5})px\)/)||[]); var W=+(m[1]||v.videoWidth);
-    q('[data-res]').textContent=W>=2500?Math.round(W/1000)+'K':W>=1900?'Full HD':'HD'; }
-  var dragP=null; // while dragging, the bar follows the pointer, not the decoder
-  function paint(){ var p=dragP!=null?dragP:(v.duration?Math.min(1,v.currentTime/end()):0);
-    fill.style.width=(p*100)+'%'; knob.style.left=(p*100)+'%';
-    var t=dragP!=null?dragP*end():v.currentTime; time.textContent=fmt(t)+' / '+fmt(v.duration);
-    track.setAttribute('aria-valuenow',Math.round(t)); track.setAttribute('aria-valuemax',Math.round(v.duration||0)); }
-  var starting=v.autoplay&&!reduce; function state(){ var p=v.paused&&dragP==null&&!starting; el.classList.toggle('is-paused',p); toggle.innerHTML=v.paused?ICON.play:ICON.pause; toggle.setAttribute('aria-label',v.paused?'Abspielen':'Pause'); }
-  var raf=0; function tick(){ paint(); raf=(!v.paused)?requestAnimationFrame(tick):0; }
-  function play(){ var r=v.play(); if(r&&r.catch) r.catch(function(){}); }
-  function flip(e){ if(e) e.stopPropagation(); v.paused?play():v.pause(); wake(); }
-  toggle.addEventListener('click',flip); big.addEventListener('click',flip);
-  v.addEventListener('click',function(e){ e.stopPropagation(); }); /* the surface does nothing (Lydia, 21.11.): play and pause only with the buttons */
-  v.addEventListener('play',function(){ if(!v.loop){ v.loop=true; if(v.currentTime>=end()-0.001) v.currentTime=0; } state(); if(!raf) tick();}); v.addEventListener('pause',function(){state();paint();});
-  v.addEventListener('loadedmetadata',function(){meta();paint();}); v.addEventListener('timeupdate',function(){ if(!raf) paint(); });
-  // Visible while the pointer moves over the video, 3.5 s after it stops, always while over the bar or dragging.
-  var hideT, overBar=false; function wake(){ el.classList.add('is-active'); clearTimeout(hideT); hideT=setTimeout(function(){ if(!overBar&&dragP==null) el.classList.remove('is-active'); },HIDE_AFTER); }
-  box.addEventListener('pointermove',wake); box.addEventListener('pointerleave',function(){ if(dragP==null){clearTimeout(hideT); el.classList.remove('is-active');} });
-  q('.kl-player__bar').addEventListener('pointerover',function(){overBar=true;wake();}); q('.kl-player__bar').addEventListener('pointerout',function(e){ if(!e.relatedTarget||!q('.kl-player__bar').contains(e.relatedTarget)){overBar=false;wake();} });
-  el.addEventListener('focusin',wake);
-  // Seeking: one seek at a time, always to the latest position, so scrubbing stays smooth.
-  var want=null, seeking=false;
-  function seekTo(t){ want=Math.min(end(),Math.max(0,t)); if(!seeking) next(); }
-  function next(){ if(want==null) return; seeking=true; var t=want; want=null; v.currentTime=t; }
-  v.addEventListener('seeked',function(){ seeking=false; next(); if(!raf) paint(); });
-  function pAt(x){ var r=track.getBoundingClientRect(); return Math.min(1,Math.max(0,(x-r.left)/r.width)); }
-  var wasPlaying=false;
-  track.addEventListener('pointerdown',function(e){ e.preventDefault(); try{ track.setPointerCapture(e.pointerId); }catch(err){} track.classList.add('is-drag'); wasPlaying=!v.paused; v.pause(); v.loop=false; /* no jump back to frame 1 at the end while scrubbing */
-    dragP=pAt(e.clientX); paint(); seekTo(dragP*end()); });
-  track.addEventListener('pointermove',function(e){ if(dragP==null) return; dragP=pAt(e.clientX); paint(); seekTo(dragP*end()); });
-  function release(){ if(dragP==null) return; var t=dragP*end(); dragP=null; track.classList.remove('is-drag'); seekTo(t); /* the loop comes back with the next play, so a stop on the last frame stays there */ state(); paint(); if(wasPlaying&&t<end()-0.01) play(); wake(); }
-  track.addEventListener('pointerup',release); track.addEventListener('pointercancel',release);
-  track.addEventListener('keydown',function(e){ var d=e.key==='ArrowRight'?1:e.key==='ArrowLeft'?-1:0; if(d){ e.preventDefault(); seekTo(v.currentTime+d); } if(e.key===' '){e.preventDefault(); flip();} });
-  // Fullscreen: the whole card (so the bar stays), else the video itself, else iOS' own player.
-  full.addEventListener('click',function(e){ e.stopPropagation();
-    var d=document; if(d.fullscreenElement||d.webkitFullscreenElement){ (d.exitFullscreen||d.webkitExitFullscreen).call(d); return; }
-    var go=function(n){ var f=n.requestFullscreen||n.webkitRequestFullscreen; if(!f) return Promise.reject(); try{ var r=f.call(n); return r&&r.then?r:Promise.resolve(); }catch(err){ return Promise.reject(err); } };
-    go(box).catch(function(){ return go(v); }).catch(function(){ if(v.webkitEnterFullscreen) v.webkitEnterFullscreen(); }); });
-  v.addEventListener('playing',function(){ if(starting){starting=false;state();} });
-  if(starting){ var r0=v.play(); if(r0&&r0.catch) r0.catch(function(){ starting=false; state(); }); setTimeout(function(){ if(starting&&v.paused){ starting=false; state(); } },2500); }
-  document.addEventListener('fullscreenchange',function(){ var on=!!document.fullscreenElement; full.innerHTML=(on?EXITS:ALTS)[fullName]; full.setAttribute('aria-label',on?'Vollbild beenden':'Vollbild'); });
-  if(zoomSrc){
-    var zl=document.createElement('div'); zl.className='kl-zoom'; zl.setAttribute('role','dialog'); zl.setAttribute('aria-label','Detailaufnahme');
-    zl.innerHTML='<img alt="'+(zImg.getAttribute('alt')||'Detailaufnahme')+'"><span class="kl-zoom__label">Detailaufnahme</span><button class="kl-zoom__close" type="button" aria-label="Schließen">'+CLOSE_ICON+'</button>';
-    box.appendChild(zl); var zb=box.querySelector('.kl-zoom-pill'), zWas=false;
-    var openZ=function(e){ if(e) e.stopPropagation(); if(!zl.querySelector('img').src) zl.querySelector('img').src=zoomSrc; zWas=!v.paused; v.pause(); zl.classList.add('is-open'); zl.querySelector('.kl-zoom__close').focus({preventScroll:true}); };
-    var closeZ=function(e){ if(e) e.stopPropagation(); zl.classList.remove('is-open'); if(zWas) play(); zb.focus({preventScroll:true}); };
-    zb.addEventListener('click',openZ); zl.querySelector('.kl-zoom__close').addEventListener('click',closeZ); zl.addEventListener('click',function(e){ e.stopPropagation(); });
-    document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&zl.classList.contains('is-open')) closeZ(); });
+  // A click on the picture itself does nothing any more (no Webflow zoom, no pause): only the controls act.
+  card.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('.image.cc-purchase')) e.stopPropagation(); }, true);
+
+  // ---------- Lupe: Foto und Video ----------
+  var pill = q('[data-kl=zoom]'), layer = q('[data-kl=zoomlayer]');
+  var zImg = q('.cc-purchase-zoom img'), zSrc = zImg && (zImg.currentSrc || zImg.getAttribute('src'));
+  var zoomOpen = false, wasPlaying = false;
+  function zoomTexts() {
+    var type = isVideo ? 'video' : 'photo', st = zoomOpen ? 'out' : 'in', label = '';
+    qa('[data-kl-type]', pill).forEach(function (t) {
+      var on = t.getAttribute('data-kl-type') === type && t.getAttribute('data-kl-state') === st;
+      show(t, on);
+      if (on && t.classList.contains('is-long')) label = t.textContent.trim();
+    });
+    show(q('[data-kl=icon-zoom-in]', pill), !zoomOpen);
+    show(q('[data-kl=icon-zoom-out]', pill), zoomOpen);
+    pill.setAttribute('aria-pressed', zoomOpen ? 'true' : 'false');
+    if (label) pill.setAttribute('aria-label', label);
   }
-  if(v.readyState>=1){meta();paint();} state(); if(!v.paused) tick();
+  function setZoom(open) {
+    zoomOpen = open;
+    if (open) {
+      var img = q('[data-kl=zoomimg]', layer);
+      if (img && !img.getAttribute('src')) { img.setAttribute('src', zSrc); img.setAttribute('alt', (zImg && zImg.getAttribute('alt')) || ''); }
+      if (isVideo) { wasPlaying = !v.paused; v.pause(); }
+    } else if (isVideo && wasPlaying) { play(); }
+    layer.classList.toggle('is-open', open);
+    layer.setAttribute('aria-hidden', open ? 'false' : 'true');
+    zoomTexts();
+  }
+  if (pill && layer && zSrc) {
+    var cam = q('.stock-icon-wrapper');
+    var camShown = !!cam && getComputedStyle(cam).display !== 'none' && qa('img', cam).some(function (i) { return i.offsetWidth > 0; });
+    pill.classList.toggle('is-solo', !camShown);
+    zoomTexts();
+    pill.addEventListener('click', function (e) { e.stopPropagation(); setZoom(!zoomOpen); });
+    pill.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setZoom(!zoomOpen); } });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && zoomOpen) setZoom(false); });
+  } else {
+    if (pill) pill.remove();
+    if (layer) layer.remove();
+  }
+
+  // ---------- Video-Player: nur Video ----------
+  var player = q('[data-kl=player]');
+  if (!isVideo) { if (player) player.remove(); return; }
+  if (!player) return;
+  if (reduce) { v.removeAttribute('autoplay'); v.pause(); }
+  var fades = qa('[data-kl-fade]', player), big = q('[data-kl=big]', player), toggle = q('[data-kl=toggle]', player);
+  var track = q('[data-kl=track]', player), fill = q('[data-kl=fill]', player), knob = q('[data-kl=knob]', player);
+  var time = q('[data-kl=time]', player), res = q('[data-kl=res]', player), full = q('[data-kl=full]', player);
+  var bar = q('.kl-bar', player);
+  var fmt = function (s) { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + ('0' + Math.floor(s % 60)).slice(-2); };
+  // The last frame, not the end: setting currentTime to duration makes a looping video jump to frame 1.
+  var FRAME = 1 / 30, end = function () { return Math.max(0, (v.duration || 0) - FRAME); };
+  var active = false, dragP = null, starting = v.autoplay && !reduce, overBar = false, hideT;
+
+  function setActive(on) { if (on === active) return; active = on; fades.forEach(function (el) { el.classList.toggle('is-on', on); }); }
+  function paused() { return v.paused && dragP == null && !starting; }
+  function wake() { setActive(true); clearTimeout(hideT); hideT = setTimeout(function () { if (!overBar && dragP == null && !paused()) setActive(false); }, 3500); }
+  function state() {
+    var p = paused();
+    big.classList.toggle('is-on', p);
+    show(q('[data-kl=icon-play]', toggle), v.paused);
+    show(q('[data-kl=icon-pause]', toggle), !v.paused);
+    toggle.setAttribute('aria-label', v.paused ? 'Abspielen' : 'Pause');
+    if (p) { clearTimeout(hideT); setActive(true); }
+  }
+  function paint() {
+    var p = dragP != null ? dragP : (v.duration ? Math.min(1, v.currentTime / end()) : 0);
+    fill.style.width = (p * 100) + '%'; knob.style.left = (p * 100) + '%';
+    var t = dragP != null ? dragP * end() : v.currentTime;
+    time.textContent = fmt(t) + ' / ' + fmt(v.duration);
+    track.setAttribute('aria-valuenow', Math.round(t)); track.setAttribute('aria-valuemax', Math.round(v.duration || 0));
+  }
+  // Delivered width from the page ("(3840×2160px)"), rounded to whole K; Full HD around 1920, below HD.
+  function meta() {
+    var m = document.body.innerText.match(/\((\d{3,5})\s*[x×]\s*(\d{3,5})px\)/) || [], W = +(m[1] || v.videoWidth || 0);
+    if (W) res.textContent = W >= 2500 ? Math.round(W / 1000) + 'K' : W >= 1900 ? 'Full HD' : 'HD';
+  }
+  var raf = 0; function tick() { paint(); raf = !v.paused ? requestAnimationFrame(tick) : 0; }
+  function flip(e) { if (e) e.stopPropagation(); v.paused ? play() : v.pause(); wake(); }
+
+  // Visible while the pointer moves over the media, 3.5 s after it stops; always while over the bar, dragging or paused.
+  card.addEventListener('pointermove', function (e) { if (e.pointerType !== 'touch') wake(); });
+  card.addEventListener('pointerleave', function () { if (dragP == null && !paused()) { clearTimeout(hideT); setActive(false); } });
+  bar.addEventListener('pointerover', function () { overBar = true; wake(); });
+  bar.addEventListener('pointerout', function (e) { if (!e.relatedTarget || !bar.contains(e.relatedTarget)) { overBar = false; wake(); } });
+  player.addEventListener('focusin', wake);
+
+  toggle.addEventListener('click', flip); big.addEventListener('click', flip);
+  [toggle, big, full].forEach(function (b) { b.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.click(); } }); });
+  v.addEventListener('playing', function () { if (starting) { starting = false; state(); } });
+  v.addEventListener('play', function () { if (!v.loop) { v.loop = true; if (v.currentTime >= end() - 0.001) v.currentTime = 0; } state(); if (!raf) tick(); });
+  v.addEventListener('pause', function () { state(); paint(); });
+  v.addEventListener('loadedmetadata', function () { meta(); paint(); });
+  v.addEventListener('timeupdate', function () { if (!raf) paint(); });
+
+  // Seeking: one seek at a time, always to the latest position; the loop is off while scrubbing.
+  var want = null, seeking = false, resume = false;
+  function next() { if (want == null) return; seeking = true; var t = want; want = null; v.currentTime = t; }
+  function seekTo(t) { want = Math.min(end(), Math.max(0, t)); if (!seeking) next(); }
+  v.addEventListener('seeked', function () { seeking = false; next(); if (!raf) paint(); });
+  function pAt(x) { var r = track.getBoundingClientRect(); return Math.min(1, Math.max(0, (x - r.left) / r.width)); }
+  track.addEventListener('pointerdown', function (e) {
+    e.preventDefault(); try { track.setPointerCapture(e.pointerId); } catch (err) {}
+    knob.classList.add('is-on'); resume = !v.paused; v.pause(); v.loop = false;
+    dragP = pAt(e.clientX); paint(); seekTo(dragP * end());
+  });
+  track.addEventListener('pointermove', function (e) { if (dragP == null) return; dragP = pAt(e.clientX); paint(); seekTo(dragP * end()); });
+  function release() {
+    if (dragP == null) return; var t = dragP * end(); dragP = null; knob.classList.remove('is-on'); seekTo(t);
+    state(); paint(); if (resume && t < end() - 0.01) play(); wake();
+  }
+  track.addEventListener('pointerup', release); track.addEventListener('pointercancel', release);
+  track.addEventListener('keydown', function (e) { var d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0; if (d) { e.preventDefault(); seekTo(v.currentTime + d); } if (e.key === ' ') { e.preventDefault(); flip(); } });
+
+  // Fullscreen: the whole card (so the bar stays), else the video, else iOS' own player.
+  full.addEventListener('click', function (e) {
+    e.stopPropagation(); var d = document;
+    if (d.fullscreenElement || d.webkitFullscreenElement) { (d.exitFullscreen || d.webkitExitFullscreen).call(d); return; }
+    var go = function (n) { var f = n.requestFullscreen || n.webkitRequestFullscreen; if (!f) return Promise.reject(); try { var r = f.call(n); return r && r.then ? r : Promise.resolve(); } catch (err) { return Promise.reject(err); } };
+    go(card).catch(function () { return go(v); }).catch(function () { if (v.webkitEnterFullscreen) v.webkitEnterFullscreen(); });
+  });
+  document.addEventListener('fullscreenchange', function () {
+    var on = !!document.fullscreenElement;
+    show(q('[data-kl=icon-expand]', full), !on); show(q('[data-kl=icon-shrink]', full), on);
+    full.setAttribute('aria-label', on ? 'Vollbild beenden' : 'Vollbild');
+  });
+
+  if (starting) { var r0 = v.play(); if (r0 && r0.catch) r0.catch(function () { starting = false; state(); }); setTimeout(function () { if (starting && v.paused) { starting = false; state(); } }, 2500); }
+  if (v.readyState >= 1) { meta(); paint(); }
+  state(); if (!v.paused) tick();
 })();

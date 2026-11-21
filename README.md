@@ -482,18 +482,25 @@ window.klStock.alleHolen();     // Katalog vorladen
 
 ---
 
-## Video-Player auf den Kaufseiten (`player.js`, seit v3.12.0, aktuell v3.12.4)
+## Video-Player und Lupe auf den Kaufseiten (`player.js`, ab v4.0.0)
 
-Eigene Leiste für Videos auf der Kaufseite (CMS-Vorlage der Stock-Items): Abspielen/Pause,
-Zeitleiste zum Spulen (bleibt am Ende auf dem letzten Bild), Zeit, Auflösung (gelieferte
-Breite auf ganze K), Lupe für die Detailaufnahme (als Ebene; die Videofläche selbst
-reagiert nicht auf Klicks) und Vollbild der ganzen Karte (Expand 5 / im Vollbild Shrink 4).
-Hintergrund: weicher Blur nur hinter der Leiste. Bei Fotos macht das Skript nichts.
+Seit v4 ist alles Sichtbare **nativ in Webflow** gebaut (CMS-Vorlage „Stock-assets Template“,
+Klassen `kl-…`, im Navigator „Video-Player (nur Video)“, „Lupe (Foto und Video)“,
+„Detail-Ebene (Lupe)“). Was Webflow nicht kann (Masken der Blur-Ebenen, Touch ohne Hover,
+Vollbild, alte Zoom-Labels aus), steht im Head-Code der Vorlage. `player.js` schaltet nur
+Zustände (`is-on`, `is-hidden`, `is-open`, `is-solo`) und entfernt bei Fotos den Video-Player.
+
+- Lupe oben rechts neben dem Kamera-Symbol, für Foto und Video gleich: beim Darüberfahren klappt
+  der Text auf, Klick zoomt hinein (Lupe wird Minus, Text wechselt), erneuter Klick oder Esc heraus.
+  Auf Touch-Geräten immer aufgeklappt mit Kurztext.
+- Video: Leiste mit Abspielen/Pause, Zeitleiste (bleibt am Ende auf dem letzten Bild), Zeit,
+  Auflösung (gelieferte Breite auf ganze K), Vollbild der ganzen Karte. Die Bildfläche selbst
+  reagiert nicht auf Klicks.
 
 In den Seiten-Einstellungen der Stock-Vorlage vor `</body>`:
 
 ```
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.12.4/player.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v4.0.0/player.min.js" defer></script>
 ```
 
 **Bauen:** `esbuild player.js --minify --legal-comments=none --target=es2017 --outfile=player.min.js`
