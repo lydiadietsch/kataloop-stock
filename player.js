@@ -42,7 +42,13 @@
     show(q('[data-kl=icon-zoom-out]', pill), zoomOpen);
     pill.setAttribute('aria-pressed', zoomOpen ? 'true' : 'false');
     if (label) pill.setAttribute('aria-label', label);
+    fitPill();
   }
+  // The pill opens to exactly the width of its current text (CSS variable --kl-open), not to a
+  // large maximum: otherwise the ease is spent on empty width and the opening stops abruptly.
+  function fitPill() { if (pill) pill.style.setProperty('--kl-open', pill.scrollWidth + 'px'); }
+  window.addEventListener('resize', function () { if (pill) fitPill(); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (pill) fitPill(); });
   // The zoom photo loads ahead (on hover or focus of the magnifier, on touch devices shortly after
   // the page) and the layer fades in only once it is decoded, so it never appears half-loaded.
   var zEl = layer && q('[data-kl=zoomimg]', layer), zReady = null, wantOpen = false;
