@@ -500,7 +500,7 @@ Zustände (`is-on`, `is-hidden`, `is-open`, `is-solo`) und entfernt bei Fotos de
 In den Seiten-Einstellungen der Stock-Vorlage vor `</body>`:
 
 ```
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v4.0.0/player.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v4.1.0/player.min.js" defer></script>
 ```
 
 **Bauen:** `esbuild player.js --minify --legal-comments=none --target=es2017 --outfile=player.min.js`

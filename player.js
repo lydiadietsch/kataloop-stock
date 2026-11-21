@@ -43,25 +43,51 @@
     pill.setAttribute('aria-pressed', zoomOpen ? 'true' : 'false');
     if (label) pill.setAttribute('aria-label', label);
   }
-  function setZoom(open) {
+  // The zoom photo loads ahead (on hover or focus of the magnifier, on touch devices shortly after
+  // the page) and the layer fades in only once it is decoded, so it never appears half-loaded.
+  var zEl = layer && q('[data-kl=zoomimg]', layer), zReady = null, wantOpen = false;
+  function loadZoom() {
+    if (zReady || !zEl) return zReady;
+    zEl.removeAttribute('loading'); zEl.setAttribute('decoding', 'async');
+    zEl.setAttribute('alt', (zImg && zImg.getAttribute('alt')) || '');
+    zReady = new Promise(function (ok) {
+      var done = function () { (zEl.decode ? zEl.decode() : Promise.resolve()).catch(function () {}).then(ok); };
+      zEl.addEventListener('load', done, { once: true }); zEl.addEventListener('error', ok, { once: true });
+      zEl.setAttribute('src', zSrc);
+      if (zEl.complete && zEl.naturalWidth) done();
+    });
+    return zReady;
+  }
+  function showLayer(open) {
     zoomOpen = open;
-    if (open) {
-      var img = q('[data-kl=zoomimg]', layer);
-      if (img && !img.getAttribute('src')) { img.setAttribute('src', zSrc); img.setAttribute('alt', (zImg && zImg.getAttribute('alt')) || ''); }
-      if (isVideo) { wasPlaying = !v.paused; v.pause(); }
-    } else if (isVideo && wasPlaying) { play(); }
     layer.classList.toggle('is-open', open);
     layer.setAttribute('aria-hidden', open ? 'false' : 'true');
     zoomTexts();
+  }
+  function setZoom(open) {
+    wantOpen = open;
+    if (!open) { pill.classList.remove('is-loading'); showLayer(false); if (isVideo && wasPlaying) play(); return; }
+    if (isVideo) { wasPlaying = !v.paused; v.pause(); }
+    var slow = setTimeout(function () { pill.classList.add('is-loading'); }, 120);
+    var give = new Promise(function (ok) { setTimeout(ok, 6000); }); // do not hang if the file is missing
+    Promise.race([loadZoom(), give]).then(function () {
+      clearTimeout(slow); pill.classList.remove('is-loading');
+      if (wantOpen) showLayer(true);
+    });
   }
   if (pill && layer && zSrc) {
     var cam = q('.stock-icon-wrapper');
     var camShown = !!cam && getComputedStyle(cam).display !== 'none' && qa('img', cam).some(function (i) { return i.offsetWidth > 0; });
     pill.classList.toggle('is-solo', !camShown);
     zoomTexts();
-    pill.addEventListener('click', function (e) { e.stopPropagation(); setZoom(!zoomOpen); });
-    pill.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setZoom(!zoomOpen); } });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && zoomOpen) setZoom(false); });
+    pill.addEventListener('pointerenter', loadZoom); pill.addEventListener('focus', loadZoom);
+    if (window.matchMedia && matchMedia('(hover: none)').matches) {
+      var later = function () { setTimeout(loadZoom, 1500); };
+      document.readyState === 'complete' ? later() : window.addEventListener('load', later, { once: true });
+    }
+    pill.addEventListener('click', function (e) { e.stopPropagation(); setZoom(!(zoomOpen || wantOpen)); });
+    pill.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setZoom(!(zoomOpen || wantOpen)); } });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && (zoomOpen || wantOpen)) setZoom(false); });
   } else {
     if (pill) pill.remove();
     if (layer) layer.remove();
