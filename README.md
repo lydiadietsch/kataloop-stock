@@ -482,7 +482,7 @@ window.klStock.alleHolen();     // Katalog vorladen
 
 ---
 
-## Video-Player auf den Kaufseiten (`player.js`, seit v3.12.0, aktuell v3.12.1)
+## Video-Player auf den Kaufseiten (`player.js`, seit v3.12.0, aktuell v3.12.2)
 
 Eigene Leiste für Videos auf der Kaufseite (CMS-Vorlage der Stock-Items): Abspielen/Pause,
 Zeitleiste zum Spulen (bleibt am Ende auf dem letzten Bild), Zeit, Auflösung (gelieferte
@@ -493,7 +493,7 @@ Hintergrund: weicher Blur nur hinter der Leiste. Bei Fotos macht das Skript nich
 In den Seiten-Einstellungen der Stock-Vorlage vor `</body>`:
 
 ```
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.12.1/player.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.12.2/player.min.js" defer></script>
 ```
 
 **Bauen:** `esbuild player.js --minify --legal-comments=none --target=es2017 --outfile=player.min.js`
