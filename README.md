@@ -479,3 +479,21 @@ window.klStock.zustand();       // Seite, Seitenzahl, geladene Seiten, Treffer, 
 window.klStock.geheZuSeite(5);
 window.klStock.alleHolen();     // Katalog vorladen
 ```
+
+---
+
+## Video-Player auf den Kaufseiten (`player.js`, seit v3.12.0)
+
+Eigene Leiste für Videos auf der Kaufseite (CMS-Vorlage der Stock-Items): Abspielen/Pause,
+Zeitleiste zum Spulen (bleibt am Ende auf dem letzten Bild), Zeit, Auflösung (gelieferte
+Breite auf ganze K), Lupe für die Detailaufnahme (als Ebene; das Video selbst pausiert nur
+noch per Klick) und Vollbild der ganzen Karte (Expand 5 / im Vollbild Shrink 4).
+Hintergrund: weicher Blur nur hinter der Leiste. Bei Fotos macht das Skript nichts.
+
+In den Seiten-Einstellungen der Stock-Vorlage vor `</body>`:
+
+```
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.12.0/player.min.js" defer></script>
+```
+
+**Bauen:** `esbuild player.js --minify --legal-comments=none --target=es2017 --outfile=player.min.js`
