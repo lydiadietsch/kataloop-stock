@@ -108,6 +108,14 @@
   var track = q('[data-kl=track]', player), fill = q('[data-kl=fill]', player), knob = q('[data-kl=knob]', player);
   var time = q('[data-kl=time]', player), res = q('[data-kl=res]', player), full = q('[data-kl=full]', player);
   var bar = q('.kl-bar', player);
+  // Labels for screen readers, in the language of the page (Webflow sets <html lang>). The
+  // visible texts are localized in Webflow; these are the only words that live in the script.
+  var EN = /^en/i.test(document.documentElement.lang || '');
+  var T = EN ? { play: 'Play', pause: 'Pause', full: 'Full screen', exitFull: 'Exit full screen', track: 'Timeline' }
+             : { play: 'Abspielen', pause: 'Pause', full: 'Vollbild', exitFull: 'Vollbild beenden', track: 'Zeitleiste' };
+  if (big) big.setAttribute('aria-label', T.play);
+  if (track) track.setAttribute('aria-label', T.track);
+  if (full) full.setAttribute('aria-label', T.full);
   var fmt = function (s) { s = Math.max(0, s || 0); return Math.floor(s / 60) + ':' + ('0' + Math.floor(s % 60)).slice(-2); };
   // The last frame, not the end: setting currentTime to duration makes a looping video jump to frame 1.
   var FRAME = 1 / 30, end = function () { return Math.max(0, (v.duration || 0) - FRAME); };
@@ -121,7 +129,7 @@
     big.classList.toggle('is-on', p);
     show(q('[data-kl=icon-play]', toggle), v.paused);
     show(q('[data-kl=icon-pause]', toggle), !v.paused);
-    toggle.setAttribute('aria-label', v.paused ? 'Abspielen' : 'Pause');
+    toggle.setAttribute('aria-label', v.paused ? T.play : T.pause);
     if (p) { clearTimeout(hideT); setActive(true); }
   }
   function paint() {
@@ -183,7 +191,7 @@
   document.addEventListener('fullscreenchange', function () {
     var on = !!document.fullscreenElement;
     show(q('[data-kl=icon-expand]', full), !on); show(q('[data-kl=icon-shrink]', full), on);
-    full.setAttribute('aria-label', on ? 'Vollbild beenden' : 'Vollbild');
+    full.setAttribute('aria-label', on ? T.exitFull : T.full);
   });
 
   if (starting) { var r0 = v.play(); if (r0 && r0.catch) r0.catch(function () { starting = false; state(); }); setTimeout(function () { if (starting && v.paused) { starting = false; state(); } }, 2500); }
