@@ -74,7 +74,7 @@
  * Der Klick auf [data-kl-original] zeigt das ungekorrigierte Ergebnis.
  *
  * EINBINDUNG (Webflow, vor </body>) — sonst nichts:
- *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.11.0/stock.min.js"></script>
+ *   <script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v4.2.0/stock.min.js"></script>
  *
  * Ereignisse:
  *   window.addEventListener("kl:rendered", e => e.detail.items)   // nach jedem Rendern
@@ -99,6 +99,7 @@
     ladeGleichzeitig: 4,           // parallele Seiten-Abrufe
     aktivKlasse: "w--current",     // Klasse der aktiven Seitenzahl
     videoVorladen: "600px",        // ab dieser Nähe Video-Metadaten holen
+    spieltKlasse: "kl-spielt",     // an der Karte, solange ihr Video läuft (blendet das Play-Symbol ein)
     verstecktKlasse: "u-d-none",   // Webflow-Klasse, mit der Status-Hüllen versteckt sind
     seitenAnfangId: "nav-top",     // Scrollziel für „Neue Suche starten"
     ladenAbMs: 250,                // so lange muss geladen werden, bis „laden" gemeldet wird
@@ -121,7 +122,7 @@
     eagerStufen: [[1920, 26], [1440, 20], [1280, 14], [992, 10], [768, 6], [0, 0]]
   };
 
-  var VERSION = "3.11.0";
+  var VERSION = "4.2.0";
   var d = document;
   var qs = function (s, r) { return (r || d).querySelector(s); };
   var qsa = function (s, r) { return Array.prototype.slice.call((r || d).querySelectorAll(s)); };
@@ -141,7 +142,9 @@
   }, { rootMargin: CFG.videoVorladen }) : null;
 
   function abspielen(v) {
+    v.__klSoll = true;
     var los = function () {
+      if (!v.__klSoll) return;     // vor canplay wieder abgewählt (Maus weg, weitergescrollt)
       var p = v.play();
       if (p && p.catch) p.catch(function () {
         v.muted = true; v.setAttribute("muted", "");
@@ -153,7 +156,52 @@
     if (v.preload === "none") v.preload = "metadata";
     if (v.readyState < 2) v.load();
   }
-  function anhalten(v) { try { v.pause(); v.currentTime = 0; } catch (e) {} }
+  function anhalten(v) { v.__klSoll = false; try { v.pause(); v.currentTime = 0; } catch (e) {} }
+
+  /* Play-Symbol neben dem Kamera-Symbol, solange das Video der Karte läuft
+     (ab v4.2.0). Dasselbe Dreieck wie im Player der Kaufseiten
+     (kl-player-play.svg), als Inline-SVG wie dort, damit es beim Zoomen auf
+     iPhone/iPad scharf bleibt. Größe und Farbe kommen vom Kamera-Symbol: das
+     SVG bekommt dessen Webflow-Klasse. Es klappt weich auf (Breite 0 →
+     Symbolbreite) und blendet dabei ein; die Lücke zum Kamera-Symbol wächst
+     mit, damit die Pille im Ruhezustand genau wie vorher aussieht. Es steht
+     LINKS vom Kamera-Symbol: die Pille hängt rechts oben in der Karte und
+     wächst nach links, so bleibt das Kamera-Symbol beim Aufklappen stehen. */
+  var PLAY_SVG = '<svg viewBox="-4 -4 32 32" aria-hidden="true" focusable="false">' +
+    '<path fill="#fff" d="M23.14 10.61 2.25 0.16A1.56 1.56 0 0 0 0 1.56v20.88a1.56 1.56 0 0 0 2.25 1.4l20.89 -10.45a1.55 1.55 0 0 0 0 -2.78Z"/></svg>';
+  var spielStil = null;
+  function spielSymbol(card, v) {
+    var pille = qs(".stock-icon-wrapper", card);
+    if (pille && !qs(".kl-spielt-symbol", pille)) {
+      if (!spielStil) {
+        spielStil = d.createElement("style");
+        spielStil.textContent =
+          ".kl-spielt-symbol{display:grid;grid-template-columns:0fr;margin-right:calc(var(--kl-luecke,0px) * -1);" +
+            "opacity:0;transform:scale(.4);transform-origin:right center;" +
+            "transition:grid-template-columns .45s cubic-bezier(.2,.8,.2,1),margin-right .45s cubic-bezier(.2,.8,.2,1)," +
+            "opacity .3s ease,transform .45s cubic-bezier(.2,.8,.2,1)}" +
+          ".kl-spielt-symbol>span{display:flex;justify-content:flex-end;min-width:0;overflow:hidden}" +
+          ".kl-spielt-symbol svg{display:block;flex:none}" +
+          "." + CFG.spieltKlasse + " .kl-spielt-symbol{grid-template-columns:1fr;margin-right:0;opacity:1;transform:none}" +
+          "@media (prefers-reduced-motion: reduce){.kl-spielt-symbol{transition:none}}";
+        d.head.appendChild(spielStil);
+      }
+      var vorbild = qsa("img", pille).filter(function (i) { return !i.classList.contains("w-condition-invisible"); })[0];
+      var symbol = d.createElement("span");
+      symbol.className = "kl-spielt-symbol";
+      symbol.setAttribute("aria-hidden", "true");
+      symbol.innerHTML = "<span>" + PLAY_SVG + "</span>";
+      if (vorbild) qs("svg", symbol).setAttribute("class", vorbild.className);
+      pille.style.setProperty("--kl-luecke", getComputedStyle(pille).columnGap);
+      pille.insertBefore(symbol, pille.firstChild);
+    }
+    var an = function () { card.classList.add(CFG.spieltKlasse); };
+    var aus = function () { card.classList.remove(CFG.spieltKlasse); };
+    v.addEventListener("playing", an);
+    v.addEventListener("pause", aus);
+    v.addEventListener("ended", aus);
+    v.addEventListener("emptied", aus);
+  }
 
   function videosBinden(scope) {
     qsa(".u-link-cover", scope || d).forEach(function (link) {
@@ -165,6 +213,7 @@
       v.muted = true;
       v.setAttribute("muted", ""); v.setAttribute("playsinline", ""); v.setAttribute("webkit-playsinline", "");
       v.removeAttribute("controls");
+      spielSymbol(card, v);
       if (metaBeobachter && !datenSparen) { v.preload = "none"; metaBeobachter.observe(v); }
       else v.preload = "metadata";
       if (wenigerBewegung || beruehrung) return;
@@ -176,8 +225,10 @@
     if (beruehrung) mobileBinden(scope);
   }
 
-  /* Mobile: das Video der Karte spielt, die gerade mittig im Bild steht. */
-  var mobilBeobachter = null, mobilAktuell = null;
+  /* Mobile: die Videos der Reihe spielen, die gerade mittig im Bild steht —
+     stehen zwei Videos nebeneinander, laufen beide (ab v4.2.0, vorher nur
+     das eine, dessen Mitte näher lag). */
+  var mobilBeobachter = null, mobilAktuell = [];
   function mobileBinden(scope) {
     if (wenigerBewegung || datenSparen || !("IntersectionObserver" in window)) return;
     if (!mobilBeobachter) {
@@ -190,19 +241,25 @@
     });
   }
   function mobileWaehlen() {
-    var mitte = window.innerHeight / 2, best = null, nah = Infinity;
+    var mitte = window.innerHeight / 2, sichtbar = [], best = null, nah = Infinity;
     qsa(".hover-video").forEach(function (v) {
       var r = v.getBoundingClientRect();
-      if (r.bottom < 0 || r.top > window.innerHeight) return;
+      if (!r.height || r.bottom < 0 || r.top > window.innerHeight) return;
       var sicht = Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0);
       if (sicht < r.height * 0.5) return;
+      sichtbar.push({ v: v, r: r });
       var dist = Math.abs((r.top + r.bottom) / 2 - mitte);
-      if (dist < nah) { nah = dist; best = v; }
+      if (dist < nah) { nah = dist; best = r; }
     });
-    if (best === mobilAktuell) return;
-    if (mobilAktuell) anhalten(mobilAktuell);
-    mobilAktuell = best;
-    if (best) abspielen(best);
+    /* Dieselbe Reihe: überlappt senkrecht mit dem mittigsten Video um mehr
+       als die halbe Höhe des kleineren. Im Raster haben Karten einer Reihe
+       dieselbe Ober- und Unterkante, versetzte Karten fallen heraus. */
+    var neu = best ? sichtbar.filter(function (s) {
+      return Math.min(s.r.bottom, best.bottom) - Math.max(s.r.top, best.top) > Math.min(s.r.height, best.height) / 2;
+    }).map(function (s) { return s.v; }) : [];
+    mobilAktuell.forEach(function (v) { if (neu.indexOf(v) < 0) anhalten(v); });
+    neu.forEach(function (v) { if (mobilAktuell.indexOf(v) < 0) abspielen(v); });
+    mobilAktuell = neu;
   }
 
   /* ── Grundelemente ─────────────────────────────────────────────── */

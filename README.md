@@ -7,7 +7,7 @@ keine Finsweet-Skripte mehr. Eine Datei, 21,3 KB (8,1 KB gzip).
 - `stock.min.js` — minifiziert, wird in Webflow geladen
 
 ```
-https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.11.0/stock.min.js
+https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v4.2.0/stock.min.js
 ```
 
 ---
@@ -42,7 +42,7 @@ jeder DOM-Änderung mit.
 Übrig bleibt **eine** Zeile:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v3.11.0/stock.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/lydiadietsch/kataloop-stock@v4.2.0/stock.min.js"></script>
 ```
 
 **Bleiben MUSS:** das Grid-Skript im `<head>` (`setGrid`/`cc-stock-tmb` samt
@@ -408,7 +408,9 @@ stehen — die Stufen decken den sichtbaren Bereich je Breite ab.
 |---|---|
 | Hover-Video tot nach Filtern/Blättern | Bindung läuft nach jedem Rendern erneut (`data-kl-hover` verhindert Doppel-Listener) |
 | Video-Metadaten für alle Karten | erst bei Sichtnähe (`preload="none"` → `metadata` per IntersectionObserver) |
-| Kein Playback auf Mobile | Video der mittig sichtbaren Karte spielt automatisch, immer nur eines |
+| Kein Playback auf Mobile | Die Videos der mittig sichtbaren Reihe spielen automatisch: stehen zwei nebeneinander, laufen beide (ab v4.2.0, vorher nur eines) |
+| Nicht erkennbar, welches Video gerade läuft (ab v4.2.0) | Play-Symbol links neben dem Kamera-Symbol, solange das Video läuft (Handy und Hover am Desktop). Dasselbe Dreieck wie im Player der Kaufseiten, Größe und Farbe vom Kamera-Symbol, klappt in 0,45 s weich auf. Die Pille sieht im Ruhezustand exakt wie vorher aus |
+| Video startete noch, obwohl die Maus schon weg war | `abspielen()` merkt sich, ob das Video noch gewollt ist; lädt es erst danach fertig, bleibt es stehen (ab v4.2.0) |
 | Ankersprung beim Filtern | passiert nicht mehr — gesprungen wird **nur** beim Blättern |
 | Anker mobil an falscher Stelle | Ziel wird **nach** dem Rendern gemessen, fixe/klebende Kopfleiste wird abgezogen |
 | `?kategorie=…` von der Detailseite | wird beim Laden übernommen, inklusive Webflow-Checkbox-Optik |
