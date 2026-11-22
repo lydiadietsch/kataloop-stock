@@ -24,6 +24,35 @@
   var show = function (el, on) { if (el) el.classList.toggle('is-hidden', !on); };
   function play() { var r = v.play(); if (r && r.catch) r.catch(function () {}); }
 
+  // Icons as inline SVG: Safari on iPhone/iPad keeps an SVG <img> as a bitmap of its layout size and
+  // only scales it up when the page is zoomed (blurry magnifier). The Webflow images stay the source:
+  // each .kl-icon image is fetched (the CDN allows it) and replaced by its vector, with the same
+  // classes and data-kl, so the state switches below keep working. If anything fails, the image stays.
+  var svgN = 0;
+  qa('img.kl-icon').forEach(function (img) {
+    var src = img.getAttribute('src') || '';
+    if (!/\.svg(\?|$)/i.test(src) || !window.fetch || !window.DOMParser) return;
+    fetch(src, { mode: 'cors' }).then(function (r) { return r.ok ? r.text() : null; }).then(function (txt) {
+      if (!txt || !img.parentNode) return;
+      var svg = new DOMParser().parseFromString(txt, 'image/svg+xml').documentElement;
+      if (!svg || svg.nodeName.toLowerCase() !== 'svg') return;
+      // ids (masks) must be unique once several icons sit in the same page
+      var n = ++svgN;
+      Array.prototype.forEach.call(svg.querySelectorAll('[id]'), function (el) {
+        var id = el.getAttribute('id'), nid = id + '-kl' + n;
+        el.setAttribute('id', nid);
+        Array.prototype.forEach.call(svg.querySelectorAll('[mask],[fill],[clip-path],[filter]'), function (u) {
+          ['mask', 'fill', 'clip-path', 'filter'].forEach(function (a) { var v0 = u.getAttribute(a); if (v0 && v0.indexOf('url(#' + id + ')') >= 0) u.setAttribute(a, v0.replace('url(#' + id + ')', 'url(#' + nid + ')')); });
+        });
+      });
+      svg.removeAttribute('id'); svg.removeAttribute('width'); svg.removeAttribute('height');
+      svg.setAttribute('class', img.getAttribute('class'));
+      if (img.hasAttribute('data-kl')) svg.setAttribute('data-kl', img.getAttribute('data-kl'));
+      svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('focusable', 'false');
+      img.parentNode.replaceChild(document.importNode(svg, true), img);
+    }).catch(function () {});
+  });
+
   // A click on the picture itself does nothing any more (no Webflow zoom, no pause): only the controls act.
   card.addEventListener('click', function (e) { if (e.target.closest && e.target.closest('.image.cc-purchase')) e.stopPropagation(); }, true);
 
